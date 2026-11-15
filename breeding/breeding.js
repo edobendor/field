@@ -214,10 +214,10 @@ function vLogin() {
 function vHome() {
   const teams = B.me.admin && B.me.teams && B.me.teams.length > 1
     ? `<select id="teamSel" style="margin-bottom:12px">${B.me.teams.map(x => `<option${myTeam() === x ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select>` : '';
-  return `${teams}<div class="card"><h2>${esc(t('code'))}</h2>
+  return `${installCard()}${teams}<div class="card"><h2>${esc(t('code'))}</h2>
     <form id="find"><input id="code" class="codein" autocomplete="off" autocapitalize="characters" placeholder="${myTeam() === 'Cultirex' ? '07C07-10' : 'AS-5-13-68'}">
     <button class="btn">${esc(t('open'))}</button></form></div>
-  <div class="card"><h2>${esc(t('recent'))}</h2><div id="recent">${recentHtml()}</div></div>${installCard()}`;
+  <div class="card"><h2>${esc(t('recent'))}</h2><div id="recent">${recentHtml()}</div></div>`;
 }
 function recentHtml() {
   const q = ckey($('#code') ? $('#code').value : '');
