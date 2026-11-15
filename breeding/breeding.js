@@ -19,7 +19,7 @@ const ckey = s => (String(s || '').toUpperCase().match(/[A-Z]+|\d+/g) || []).map
 // ---------- languages ----------
 const L = {
   he: {
-    title: 'בן דור - טיפוח', loginTitle: 'כניסה', user: 'שם משתמש', pin: 'קוד אישי', login: 'כניסה', logout: 'יציאה',
+    title: 'טיפוח', loginTitle: 'כניסה', user: 'שם משתמש', pin: 'קוד אישי', login: 'כניסה', logout: 'יציאה',
     badLogin: 'שם משתמש או קוד שגויים', locked: 'המשתמש ננעל. פנה למנהל.', offline: 'אין חיבור לשרת', allTeams: 'כל הצוותים',
     code: 'קוד זן', open: 'פתח', recent: 'הערכות אחרונות', none: 'אין עדיין הערכות', evals: 'הערכות', typeCode: 'הקלד קוד זן',
     back: 'חזרה', backNoSave: 'חזרה בלי לשמור', newEval: '+ הערכה חדשה', history: 'היסטוריה',
@@ -40,7 +40,7 @@ const L = {
     n_size: 'גודל', n_mm: 'מ"מ', n_yield: 'יבול', n_weeks: 'שבועות קירור', n_firm: 'מוצקות', n_set: 'חנטה'
   },
   en: {
-    title: 'Ben Dor - Breeding', loginTitle: 'Sign in', user: 'User name', pin: 'Personal code', login: 'Sign in', logout: 'Sign out',
+    title: 'Breeding', loginTitle: 'Sign in', user: 'User name', pin: 'Personal code', login: 'Sign in', logout: 'Sign out',
     badLogin: 'Wrong user name or code', locked: 'This user is locked. Contact the manager.', offline: 'No connection to the server', allTeams: 'All teams',
     code: 'Variety code', open: 'Open', recent: 'Recent evaluations', none: 'No evaluations yet', evals: 'evaluations', typeCode: 'Type a variety code',
     back: 'Back', backNoSave: 'Back without saving', newEval: '+ New evaluation', history: 'History',
@@ -63,6 +63,10 @@ const L = {
 };
 let lang = localStorage.getItem('br_lang') || '';
 const t = k => (L[lang || 'he'][k]) ?? L.he[k] ?? k;
+
+// The header carries the team's own name: Cultirex users see Cultirex, not Ben Dor.
+const teamName = () => { const x = myTeam(); return x === 'Ben Dor' && (lang || 'he') === 'he' ? 'בן דור' : x; };
+const title = () => (B.token && teamName() ? teamName() + ' - ' : '') + t('title');
 
 function toast(msg) {
   const el = $('#toast'); el.textContent = msg; el.classList.add('show');
@@ -168,7 +172,7 @@ async function loadCode(code) {
 // ---------- screens ----------
 function renderTop() {
   const n = waiting();
-  $('#top').innerHTML = `<div class="title">${esc(t('title'))}</div><div class="right">
+  $('#top').innerHTML = `<div class="title">${esc(title())}</div><div class="right">
     ${B.token ? `<button data-act="sync">${busy ? '⟳' : n ? '⏳ ' + n : '✓'}</button>` : ''}
     <select id="langSel" aria-label="language"><option value="he"${(lang || 'he') === 'he' ? ' selected' : ''}>עברית</option><option value="en"${lang === 'en' ? ' selected' : ''}>English</option></select>
     ${B.token ? `<button data-act="logout">${esc(t('logout'))}</button>` : ''}</div>`;
@@ -176,7 +180,7 @@ function renderTop() {
 function render() {
   document.documentElement.lang = lang || 'he';
   document.documentElement.dir = lang === 'en' ? 'ltr' : 'rtl';
-  document.title = t('title');
+  document.title = title();
   renderTop();
   const app = $('#app');
   if (!B.token) { app.innerHTML = vLogin(); return; }
