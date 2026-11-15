@@ -1,0 +1,13 @@
+{
+  "name": "בן דור - דיווח שטח",
+  "short_name": "דיווח שטח",
+  "start_url": "./",
+  "display": "standalone",
+  "dir": "rtl",
+  "lang": "he",
+  "background_color": "#f2f5f8",
+  "theme_color": "#014e8c",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
