@@ -11,6 +11,8 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const pad = n => String(n).padStart(2, '0');
 const dstr = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const tnow = () => { const d = new Date(); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+// sort key for punches: within the same minute, a clock-in comes before a clock-out
+const pkey = p => p.date + p.time + (p.type === 'out' ? '1' : '0');
 const mins = hm => +hm.slice(0, 2) * 60 + +hm.slice(3, 5);
 const dshow = s => s.split('-').reverse().join('.');
 const h2 = n => n == null ? '' : (Math.round(n * 100) / 100).toFixed(2);
@@ -89,7 +91,14 @@ function applyState(st) {
     return server.concat(pend.filter(o => o.op === op && !ids.has(o.id)).map(o => ({ ...o.rec, id: o.id, userId: o.userId })));
   };
   S.user = st.user; S.users = st.users;
-  S.punches = merge(st.punches, 'punch'); S.reports = merge(st.reports, 'report');
+  S.punches = merge(st.punches, 'punch');
+  // An unsent report (new, or an edit of today's) wins over the server's copy of the same report.
+  const reps = new Map(st.reports.map(r => [r.id, r]));
+  pend.filter(o => o.op === 'report').forEach(o => {
+    const id = o.rec.reportId || o.id, prev = reps.get(id);
+    reps.set(id, { ...o.rec, id, userId: o.userId, media: (prev && prev.media) || [] });
+  });
+  S.reports = [...reps.values()];
   S.consent = st.consent || pend.some(o => o.op === 'consent');
 }
 const myOutboxFor = id => S.outbox.filter(o => o.userId === id);
@@ -152,7 +161,7 @@ function attendanceRows(data, from, to, userId) {
   const rows = [];
   for (const u of data.users) {
     if (userId && u.id !== userId) continue;
-    const ps = data.punches.filter(p => p.userId === u.id).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+    const ps = data.punches.filter(p => p.userId === u.id).sort((a, b) => pkey(a).localeCompare(pkey(b)));
     const mk = (pin, pout) => {
       const base = pin || pout;
       rows.push({ date: base.date, userId: u.id, name: u.name, tin: pin ? pin.time : '', tout: pout ? pout.time : '',
@@ -180,7 +189,7 @@ const reportRows = (data, from, to, userId) => data.reports
   .filter(r => r.date >= from && r.date <= to && (!userId || r.userId === userId || r.crew.includes(userId)))
   .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start));
 const mineData = () => ({ users: S.users.some(u => u.id === S.user.id) ? S.users : [S.user, ...S.users], punches: S.punches, reports: S.reports });
-const lastPunch = () => S.punches.filter(p => p.userId === S.user.id).sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time))[0] || null;
+const lastPunch = () => S.punches.filter(p => p.userId === S.user.id).sort((a, b) => pkey(b).localeCompare(pkey(a)))[0] || null;
 
 // ---------- CSV ----------
 function downloadCsv(name, header, rows) {
@@ -256,7 +265,7 @@ function vHome() {
   const stale = !!last && last.type === 'in' && last.date !== today;
   let hrs = attendanceRows(mineData(), today, today, S.user.id).filter(r => r.source === 'self').reduce((s, r) => s + (r.hours || 0), 0);
   if (on) hrs += Math.max(0, mins(tnow()) - mins(last.time)) / 60;
-  const todays = S.punches.filter(p => p.userId === S.user.id && p.date === today).sort((a, b) => a.time.localeCompare(b.time));
+  const todays = S.punches.filter(p => p.userId === S.user.id && p.date === today).sort((a, b) => pkey(a).localeCompare(pkey(b)));
   return `<div class="card"><div class="muted">${esc(t('hello'))}, ${esc(S.user.name)}</div>
     <div class="state ${on ? 'on' : ''}">${on ? `${esc(t('workingSince'))} ${last.time}` : esc(t('notWorking'))}</div>
     ${stale ? `<p class="pill warn" style="white-space:normal">${esc(t('openFromBefore'))}</p>` : ''}
@@ -264,34 +273,56 @@ function vHome() {
     <div id="gpsmsg" class="muted" style="margin-top:8px;min-height:20px"></div></div>
   <div class="card"><h2>${esc(t('today'))} · ${esc(t('hoursToday'))}: ${h2(hrs)}</h2>
     ${todays.length ? `<ul class="list">${todays.map(p => `<li><span>${esc(t(p.type))} ${p.time}</span><span>${locPill(p)}</span></li>`).join('')}</ul>` : `<div class="muted">${esc(t('noPunches'))}</div>`}</div>
-  <button class="btn sec" data-act="go" data-view="report">📝 ${esc(t('report'))}</button>`;
+  ${homeReportBlock(on)}`;
+}
+// One work report per day, filled in at clock-out and editable until the end of that day.
+const todayStr = () => dstr(new Date());
+const myTodayPunches = () => S.punches.filter(p => p.userId === S.user.id && p.date === todayStr()).sort((a, b) => pkey(a).localeCompare(pkey(b)));
+const todayReport = () => S.reports.find(r => r.userId === S.user.id && r.date === todayStr()) || null;
+const outToday = () => myTodayPunches().some(p => p.type === 'out');
+const canReport = () => isMgr() || outToday() || !!todayReport();
+function homeReportBlock(on) {
+  const btn = k => `<button class="btn sec" data-act="go" data-view="report">📝 ${esc(t(k))}</button>`;
+  if (todayReport()) return btn('editToday');
+  if (on || !canReport()) return `<p class="muted" style="text-align:center">${esc(t('reportAtOut'))}</p>`;
+  return `${outToday() ? `<p class="pill warn" style="white-space:normal;font-size:15px;display:block;text-align:center">${esc(t('noReportToday'))}</p>` : ''}${btn('reportNow')}`;
 }
 
 function vReport() {
+  if (!canReport()) return `<div class="card"><h2>${esc(t('report'))}</h2><p>${esc(t('reportAfterOut'))}</p>
+    <button class="btn sec" data-act="go" data-view="home">${esc(t('home'))}</button></div>`;
   const crew = S.users.filter(u => !MGR.includes(u.role) || u.id === S.user.id);
   const single = S.user.role === 'worker';
-  return `<form id="repForm" class="card"><h2>${esc(t('report'))}</h2>
-    <label for="rDate">${esc(t('date'))}</label><input id="rDate" type="date" value="${dstr(new Date())}" max="${dstr(new Date())}" required>
-    <label for="rAct">${esc(t('activity'))}</label><select id="rAct">${ACTIVITIES.map(([a]) => `<option value="${a}">${esc(t('act_' + a))}</option>`).join('')}</select>
-    ${single ? '' : `<label>${esc(t('crew'))}</label><div class="crew">${crew.map(u => `<label><input type="checkbox" name="crew" value="${u.id}"${u.id === S.user.id && !isMgr() ? ' checked' : ''}>${esc(u.name)}</label>`).join('')}</div>
-    <label for="rExtra">${esc(t('extraWorkers'))}</label><input id="rExtra" type="number" min="0" value="0" inputmode="numeric">`}
-    <div class="row"><div><label for="rStart">${esc(t('start'))}</label><input id="rStart" type="time" value="06:00" required></div>
-      <div><label for="rEnd">${esc(t('end'))}</label><input id="rEnd" type="time" value="${tnow()}" required></div></div>
-    <label for="rBreak">${esc(t('breakMin'))}</label><input id="rBreak" type="number" min="0" value="30" inputmode="numeric">
-    <div class="row"><div><label for="rQty">${esc(t('qty'))}</label><input id="rQty" type="number" min="0" step="any" inputmode="decimal"></div>
-      <div><label for="rUnit">${esc(t('unit'))}</label><select id="rUnit">${UNITS.map(u => `<option value="${u}">${esc(t('unit_' + u))}</option>`).join('')}</select></div></div>
-    <label for="rNotes">${esc(t('notes'))}</label><textarea id="rNotes"></textarea>
+  const prev = todayReport(), ps = myTodayPunches();
+  const firstIn = ps.find(p => p.type === 'in'), lastOut = ps.filter(p => p.type === 'out').pop();
+  const v = prev || { activity: ACTIVITIES[0][0], crew: isMgr() ? [] : [S.user.id], extra: 0, start: firstIn ? firstIn.time : '06:00', end: lastOut ? lastOut.time : tnow(), breakMin: 30, qty: null, unit: '', notes: '', media: [] };
+  if (!prev && mins(v.end) - mins(v.start) < 360) v.breakMin = 0;   // no default break on a short day
+  const sel = (a, b) => a === b ? ' selected' : '';
+  return `<form id="repForm" class="card"${prev ? ' data-edit="1"' : ''}><h2>${esc(t(prev ? 'editTitle' : 'report'))} · ${dshow(prev ? prev.date : todayStr())}</h2>
+    ${prev ? `<p class="muted">${esc(t('editHelp'))}</p>` : ''}
+    <label for="rAct">${esc(t('activity'))}</label><select id="rAct">${ACTIVITIES.map(([a]) => `<option value="${a}"${sel(a, v.activity)}>${esc(t('act_' + a))}</option>`).join('')}</select>
+    ${single ? '' : `<label>${esc(t('crew'))}</label><div class="crew">${crew.map(u => `<label><input type="checkbox" name="crew" value="${u.id}"${v.crew.includes(u.id) ? ' checked' : ''}>${esc(u.name)}</label>`).join('')}</div>
+    <label for="rExtra">${esc(t('extraWorkers'))}</label><input id="rExtra" type="number" min="0" value="${v.extra}" inputmode="numeric">`}
+    <div class="row"><div><label for="rStart">${esc(t('start'))}</label><input id="rStart" type="time" value="${esc(v.start)}" required></div>
+      <div><label for="rEnd">${esc(t('end'))}</label><input id="rEnd" type="time" value="${esc(v.end)}" required></div></div>
+    <label for="rBreak">${esc(t('breakMin'))}</label><input id="rBreak" type="number" min="0" value="${v.breakMin}" inputmode="numeric">
+    <div class="row"><div><label for="rQty">${esc(t('qty'))}</label><input id="rQty" type="number" min="0" step="any" inputmode="decimal" value="${v.qty ?? ''}"></div>
+      <div><label for="rUnit">${esc(t('unit'))}</label><select id="rUnit">${UNITS.map(u => `<option value="${u}"${sel(u, v.unit)}>${esc(t('unit_' + u))}</option>`).join('')}</select></div></div>
+    <label for="rNotes">${esc(t('notes'))}</label><textarea id="rNotes">${esc(v.notes)}</textarea>
     <div class="row" style="margin-top:12px">
       <button type="button" class="btn sec" style="margin:0" data-act="attach">📷 ${esc(t('attach'))}</button>
       <button type="button" class="btn sec" style="margin:0" data-act="rec" id="recBtn">🎤 ${esc(t('recVoice'))}</button></div>
     <input id="rFiles" type="file" accept="image/*,video/*" multiple hidden>
+    ${v.media && v.media.length ? `<p class="muted">${esc(t('alreadySent'))}: ${v.media.map(m => kindIcon(m.kind)).join(' ')}</p>` : ''}
     <div class="att" id="attList"></div>
-    <button class="btn" id="sendBtn">${esc(t('send'))}</button></form>`;
+    <button class="btn" id="sendBtn">${esc(t(prev ? 'saveChanges' : 'send'))}</button>
+    ${prev ? '' : `<button type="button" class="btn sec" data-act="go" data-view="home">${esc(t('skipReport'))}</button>`}</form>`;
 }
 function afterReport() {
+  const form = $('#repForm'); if (!form) return;
   const act = $('#rAct'), unit = $('#rUnit');
   const setUnit = () => { unit.value = (ACTIVITIES.find(a => a[0] === act.value) || [])[1] || 'none'; };
-  act.addEventListener('change', setUnit); setUnit();
+  act.addEventListener('change', setUnit); if (!form.dataset.edit) setUnit();
   $('#rFiles').addEventListener('change', async e => {
     for (const f of [...e.target.files]) {
       const blob = await shrink(f);
@@ -314,7 +345,7 @@ function vMine() {
   const self = rows.filter(r => r.source === 'self'), lead = rows.filter(r => r.source === 'leader');
   const sum = a => a.reduce((s, r) => s + (r.hours || 0), 0);
   const reps = reportRows(data, from, to, S.user.id).reverse();
-  const waiting = new Set(myOutbox().map(o => o.id));
+  const waiting = new Set(myOutbox().map(o => o.rec.reportId || o.id));
   return `<div class="card"><h2>${esc(t('monthHours'))}</h2>
     <ul class="list"><li><span>${esc(t('hoursSelf'))}</span><b>${h2(sum(self))}</b></li><li><span>${esc(t('hoursLeader'))}</span><b>${h2(sum(lead))}</b></li></ul></div>
   <div class="card"><h2>${esc(t('myPunches'))}</h2>${self.length ? `<ul class="list">${self.slice().reverse().map(r => `<li><span>${dshow(r.date)} · ${r.tin || '--:--'} - ${r.tout || `<span class="pill bad">${esc(t('missingOut'))}</span>`}</span><span>${r.hours != null ? h2(r.hours) : ''} ${locPill(r.lin)}</span></li>`).join('')}</ul>` : `<div class="muted">${esc(t('noPunches'))}</div>`}</div>
@@ -398,7 +429,9 @@ const actions = {
     const rec = { type, date: dstr(new Date()), time: tnow(), ...pos };
     const id = uid();
     S.punches.push({ ...rec, id, userId: S.user.id });
-    queue('punch', rec, id); render();
+    queue('punch', rec, id);
+    if (type === 'out' && !todayReport()) { view = 'report'; window.scrollTo(0, 0); }   // the day's report is filled in at clock-out
+    render();
     toast(`${t(type === 'in' ? 'savedIn' : 'savedOut')} · ${t(pos.lat == null ? 'noGps' : 'withLoc')}`);
   },
   attach() { $('#rFiles').click(); },
@@ -487,22 +520,28 @@ document.addEventListener('submit', async e => {
   if (e.target.id === 'repForm') {
     const start = $('#rStart').value, end = $('#rEnd').value, brk = parseInt($('#rBreak').value, 10) || 0;
     const m = mins(end) - mins(start) - brk;
-    if (m <= 0) return toast(t('badTimes'));
+    if (mins(end) <= mins(start)) return toast(t('badTimes'));
+    if (m <= 0) return toast(t('breakTooLong'));
     const single = S.user.role === 'worker';
     const crew = single ? [S.user.id] : $$('input[name=crew]:checked').map(i => i.value);
     const extra = single ? 0 : (parseInt($('#rExtra').value, 10) || 0);
     if (!crew.length && !extra) return toast(t('noCrew'));
     const btn = $('#sendBtn'); btn.disabled = true; btn.textContent = t('locating');
     const rec = {
-      date: $('#rDate').value, activity: $('#rAct').value, crew, extra, start, end, breakMin: brk, hours: m / 60,
+      date: todayReport() ? todayReport().date : todayStr(), activity: $('#rAct').value, crew, extra, start, end, breakMin: brk, hours: m / 60,
       qty: $('#rQty').value === '' ? null : parseFloat($('#rQty').value), unit: $('#rUnit').value, notes: $('#rNotes').value.trim()
     };
     rec.loc = await getPos();
-    const id = uid(), files = pending; pending = [];
+    const prev = todayReport();
+    const id = prev ? prev.id : uid(), files = pending; pending = [];
+    rec.reportId = id; rec.edit = !!prev;
     for (const a of files) await mediaPut(a.id, a.blob);
-    S.reports.push({ ...rec, id, userId: S.user.id, media: files.map(a => ({ id: a.id, name: a.name, kind: a.kind, url: '' })) });
+    const media = ((prev && prev.media) || []).concat(files.map(a => ({ id: a.id, name: a.name, kind: a.kind, url: '' })));
+    S.reports = S.reports.filter(r => r.id !== id).concat([{ ...rec, id, userId: S.user.id, media }]);
+    // an earlier version of today's report that was not sent yet is replaced by this one
+    S.outbox = S.outbox.filter(o => !(o.op === 'report' && o.userId === S.user.id && (o.rec.reportId || o.id) === id));
     for (const a of files) S.outbox.push({ op: 'media', id: a.id, userId: S.user.id, rec: { reportId: id, name: a.name, kind: a.kind, mime: a.blob.type } });
-    queue('report', rec, id);
+    queue('report', rec);
     view = 'mine'; render(); window.scrollTo(0, 0);
     toast(navigator.onLine ? t('sent') : t('savedOffline'));
   }
