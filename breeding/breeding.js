@@ -21,7 +21,7 @@ const L = {
   he: {
     title: 'טיפוח', loginTitle: 'כניסה', user: 'שם משתמש', pin: 'קוד אישי', login: 'כניסה', logout: 'יציאה',
     badLogin: 'שם משתמש או קוד שגויים', locked: 'המשתמש ננעל. פנה למנהל.', offline: 'אין חיבור לשרת', allTeams: 'כל הצוותים',
-    code: 'קוד זן', open: 'פתח', recent: 'הערכות אחרונות', none: 'אין עדיין הערכות', evals: 'הערכות', typeCode: 'הקלד קוד זן',
+    code: 'קוד זן', open: 'פתח', recent: 'זנים קיימים', searchHint: 'הקלד חלק מהקוד ובחר מהרשימה. אין צורך במקפים או באפסים.', pickOne: 'יש כמה זנים דומים. בחר מהרשימה.', newCode: 'קוד חדש, לא קיים ברשימה. אם התכוונת לזן קיים, בחר אותו:', noMatch: 'אין זן קיים שמתאים. לחיצה על "פתח" תיצור קוד חדש.', none: 'אין עדיין הערכות', evals: 'הערכות', typeCode: 'הקלד קוד זן',
     back: 'חזרה', backNoSave: 'חזרה בלי לשמור', newEval: '+ הערכה חדשה', history: 'היסטוריה',
     noneFor: 'אין עדיין הערכות לקוד הזה. אם הקוד קיים בכתיב אחר, בדוק ברשימה במסך הראשי.',
     stage: 'שלב', mother: 'עץ אם', graft: 'מורכב', when: 'מועד ההערכה', harvest: 'בקטיף', storage: 'אחרי קירור',
@@ -43,7 +43,7 @@ const L = {
   en: {
     title: 'Breeding', loginTitle: 'Sign in', user: 'User name', pin: 'Personal code', login: 'Sign in', logout: 'Sign out',
     badLogin: 'Wrong user name or code', locked: 'This user is locked. Contact the manager.', offline: 'No connection to the server', allTeams: 'All teams',
-    code: 'Variety code', open: 'Open', recent: 'Recent evaluations', none: 'No evaluations yet', evals: 'evaluations', typeCode: 'Type a variety code',
+    code: 'Variety code', open: 'Open', recent: 'Existing varieties', searchHint: 'Type part of the code and pick from the list. Hyphens and zeros do not matter.', pickOne: 'Several similar codes. Pick one from the list.', newCode: 'New code, not in the list. If you meant an existing variety, pick it:', noMatch: 'No existing variety matches. "Open" will create a new code.', none: 'No evaluations yet', evals: 'evaluations', typeCode: 'Type a variety code',
     back: 'Back', backNoSave: 'Back without saving', newEval: '+ New evaluation', history: 'History',
     noneFor: 'No evaluations for this code yet. If the code exists in another spelling, check the list on the main screen.',
     stage: 'Stage', mother: 'Mother tree', graft: 'Grafted', when: 'Evaluation time', harvest: 'At harvest', storage: 'After cold storage',
@@ -96,9 +96,33 @@ const DECISIONS = { mother: ['keep', 'graft', 'discard'], graft: ['keep', 'advan
 
 // ---------- state ----------
 const LS = 'br_state_v2' + (MOCK ? '_mock' : '');
-const EMPTY = { token: null, me: null, team: '', codes: [], cache: {}, evals: [], photos: [] };
+const EMPTY = { token: null, me: null, team: '', codes: [], all: {}, cache: {}, evals: [], photos: [] };
 let B = (() => { try { return Object.assign({}, EMPTY, JSON.parse(localStorage.getItem(LS))); } catch (e) { return { ...EMPTY }; } })();
-const persist = () => localStorage.setItem(LS, JSON.stringify(B));
+function persist() {
+  try { localStorage.setItem(LS, JSON.stringify(B)); }
+  catch (e) { B.cache = {}; try { localStorage.setItem(LS, JSON.stringify(B)); } catch (e2) { /* phone storage full: keep working from memory */ } }
+}
+// Finding a variety must not depend on how the code was typed: 13C0402, 13c-4-2 and 13C04-02 all find 13C04-02.
+const plain = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const loose = s => plain(s).replace(/0/g, '');
+function matches(q) {
+  const list = B.codes.filter(c => c.team === myTeam()), p = plain(q), l = loose(q);
+  if (!p) return list.slice(0, 40);
+  const a = list.filter(c => plain(c.code).startsWith(p));
+  const b = list.filter(c => !a.includes(c) && loose(c.code).startsWith(l));
+  const d = list.filter(c => !a.includes(c) && !b.includes(c) && loose(c.code).includes(l));
+  return a.concat(b, d).slice(0, 40);
+}
+function codesOf(team) {
+  const m = new Map();
+  for (const e of B.all[team] || []) {
+    const k = ckey(e.code);
+    if (!m.has(k)) m.set(k, { team, code: e.code, last: '', stage: e.stage, n: 0, decision: '' });
+    const c = m.get(k); c.n++;
+    if (e.date >= c.last) { c.last = e.date; c.stage = e.stage; if (e.decision) c.decision = e.decision; }
+  }
+  return [...m.values()].sort((x, y) => y.last.localeCompare(x.last));
+}
 let view = 'home', cur = '', busy = false;
 let form = null;      // { code, stage, kind, date, vals, decision, photos: [{id, blob, thumb}] }
 const myTeam = () => (B.me && B.me.admin ? B.team : '') || (B.me && B.me.team) || '';
@@ -157,18 +181,22 @@ async function sync() {
   if (!waiting()) loadCodes();
 }
 async function loadCodes() {
-  try { const j = await api('bcodes', { team: myTeam() }); if (j.ok) { B.codes = j.codes; persist(); if (view === 'home') drawRecent(); } } catch (e) { /* offline */ }
-}
-async function loadCode(code) {
   const team = myTeam();
   try {
-    const j = await api('bget', { code, team });
+    const j = await api('ball', { team });
+    if (j.ok) { B.all[team] = j.evals; B.codes = codesOf(team); persist(); if (view === 'home') drawRecent(); if (view === 'card') render(); }
+  } catch (e) { /* offline: the copy on the phone is used */ }
+}
+async function loadCode(code) {
+  const team = myTeam(), k = tkey(team, code);
+  try {
+    const j = await api('bphotos', { code, team });
     if (j.ok) {
-      B.cache[tkey(team, code)] = { evals: j.evals, photos: j.photos };
-      const ks = Object.keys(B.cache); while (ks.length > 40) delete B.cache[ks.shift()];
+      B.cache[k] = { evals: (B.cache[k] || {}).evals || [], photos: j.photos };
+      const ks = Object.keys(B.cache); while (ks.length > 25) delete B.cache[ks.shift()];
       persist(); if (view === 'card' && ckey(cur) === ckey(code)) render();
     }
-  } catch (e) { /* offline: the copy kept on the phone is shown */ }
+  } catch (e) { /* offline: text is shown, photos when there is reception */ }
 }
 
 // ---------- install to the home screen ----------
@@ -216,12 +244,13 @@ function vHome() {
     ? `<select id="teamSel" style="margin-bottom:12px">${B.me.teams.map(x => `<option${myTeam() === x ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select>` : '';
   return `${installCard()}${teams}<div class="card"><h2>${esc(t('code'))}</h2>
     <form id="find"><input id="code" class="codein" autocomplete="off" autocapitalize="characters" placeholder="${myTeam() === 'Cultirex' ? '07C07-10' : 'AS-5-13-68'}">
+    <div class="hint">${esc(t('searchHint'))}</div>
     <button class="btn">${esc(t('open'))}</button></form></div>
   <div class="card"><h2>${esc(t('recent'))}</h2><div id="recent">${recentHtml()}</div></div>`;
 }
 function recentHtml() {
-  const q = ckey($('#code') ? $('#code').value : '');
-  const list = B.codes.filter(c => c.team === myTeam() && (!q || ckey(c.code).includes(q))).slice(0, 40);
+  const q = $('#code') ? $('#code').value : '', list = matches(q);
+  if (!list.length && plain(q)) return `<div class="muted">${esc(t('noMatch'))}</div>`;
   return list.length ? `<ul class="list">${list.map(c => `<li data-act="open" data-code="${esc(c.code)}" style="cursor:pointer"><span><span class="code">${esc(c.code)}</span><br><span class="muted">${dshow(c.last)} · ${esc(t(c.stage))} · ${c.n} ${esc(t('evals'))}</span></span>
     ${c.decision ? `<span class="pill ${c.decision === 'discard' ? 'bad' : 'ok'}">${esc(t('d_' + c.decision))}</span>` : ''}</li>`).join('')}</ul>` : `<div class="muted">${esc(t('none'))}</div>`;
 }
@@ -229,8 +258,10 @@ function drawRecent() { const el = $('#recent'); if (el) el.innerHTML = recentHt
 
 // everything known about one code: what the server has plus what is still waiting on this phone
 function history(code) {
-  const team = myTeam(), k = ckey(code), c = B.cache[tkey(team, code)] || { evals: [], photos: [] };
+  const team = myTeam(), k = ckey(code), kept = B.cache[tkey(team, code)] || { evals: [], photos: [] };
   const mine = x => x.team === team && ckey(x.code) === k;
+  const stored = (B.all[team] || []).filter(e => ckey(e.code) === k);
+  const c = { evals: stored.concat((kept.evals || []).filter(e => !stored.some(x => x.id === e.id))), photos: kept.photos || [] };
   const evals = c.evals.concat(B.evals.filter(e => mine(e) && !c.evals.some(x => x.id === e.id)).map(e => ({ ...e, local: true })));
   const photos = c.photos.concat(B.photos.filter(p => mine(p) && !c.photos.some(x => x.id === p.id)).map(p => ({ ...p, local: true })));
   const key = e => e.date + (e.kind === 'storage' ? '1' : '0');
@@ -266,7 +297,7 @@ function vCard() {
       <div class="nums">${nums(e)}</div>${texts(e)}
       <div class="muted" style="font-size:13px">${esc(e.evaluator || '')}</div>
       <div class="thumbs">${h.photos.filter(p => p.evalId === e.id).map(p => `<span class="t${isVideo(p) ? ' vid' : ''}" title="${esc(p.name || '')}"><img src="data:image/jpeg;base64,${p.thumb || BLANK}" data-act="zoom" data-id="${p.id}" data-local="${p.local ? 1 : ''}" data-video="${isVideo(p) ? 1 : ''}" alt=""></span>`).join('')}</div></div>`).join('')
-    : `<div class="muted">${esc(t('noneFor'))}</div>`}</div>`;
+    : `<div class="muted">${esc(t('newCode'))}</div><div class="chips" style="margin-top:8px">${matches(cur).slice(0, 8).map(c => `<button data-act="open" data-code="${esc(c.code)}"><span class="code">${esc(c.code)}</span></button>`).join('')}</div>`}</div>`;
 }
 function fieldHtml(k) {
   const f = FIELDS[k], v = form.vals[k] ?? '';
@@ -305,7 +336,13 @@ function readForm() {
 function openCode(code) {
   code = String(code || '').trim().toUpperCase().replace(/\s+/g, '-');
   if (!ckey(code)) return toast(t('typeCode'));
-  const known = B.codes.find(c => c.team === myTeam() && ckey(c.code) === ckey(code));   // keep one spelling per variety
+  const list = B.codes.filter(c => c.team === myTeam());
+  let known = list.find(c => ckey(c.code) === ckey(code));          // keep one spelling per variety
+  if (!known) {
+    const m = list.filter(c => loose(c.code) === loose(code));       // typed without hyphens or zeros
+    if (m.length > 1) { drawRecent(); return toast(t('pickOne')); }
+    known = m[0];
+  }
   cur = known ? known.code : code; view = 'card'; render(); window.scrollTo(0, 0); loadCode(cur);
 }
 
