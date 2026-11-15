@@ -116,6 +116,12 @@ a { color: var(--brand-d); }
 #install p { line-height: 1.6; font-size: 17px; }
 #top { min-height: 52px; }
 tr.pending { background: #fff8ec; }
+/* login screen: a photo from the orchard behind the form */
+body.bg::before { content: ''; position: fixed; inset: 0; z-index: -1;
+  background: linear-gradient(rgba(1,58,105,.15), rgba(1,58,105,.6)), url(login.jpg) center / cover no-repeat; }
+body.bg .card { background: rgba(255,255,255,.95); }
+.hero { color: #fff; font-size: 26px; font-weight: 800; text-align: center; padding: 26px 8px 22px; text-shadow: 0 2px 8px rgba(0,0,0,.55); }
+.greet { font-size: 20px; font-weight: 700; color: var(--brand-d); }
 /* dashboard */
 .dnav { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
 .dnav input { flex: 1; min-width: 0; text-align: center; font-weight: 700; padding: 11px 6px; }

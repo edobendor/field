@@ -243,6 +243,7 @@ function render() {
   renderTop();
   const app = $('#app');
   app.className = '';
+  document.body.classList.toggle('bg', !S.user);   // orchard photo behind the login and registration screens
   if (!S.user) { $('#nav').innerHTML = ''; app.innerHTML = vLogin(); return; }
   if (!S.consent) { $('#nav').innerHTML = ''; app.innerHTML = vConsent(); return; }
   if (view === 'admin' && !isMgr()) view = 'home';
@@ -269,7 +270,7 @@ function vLogin() {
     <label for="gPin2">${esc(t('pinAgain'))}</label><input id="gPin2" type="password" inputmode="numeric" autocomplete="new-password" minlength="4" maxlength="8" required>
     <button class="btn" id="regBtn">${esc(t('register'))}</button>
     <button type="button" class="btn sec" data-act="hideReg">${esc(t('backToLogin'))}</button></form>`;
-  return `${regDone ? `<div class="card"><span class="pill ok" style="white-space:normal;font-size:16px">${esc(t('regDone'))}</span></div>` : ''}
+  return `<div class="hero">${esc(t('loginHero'))}</div>${regDone ? `<div class="card"><span class="pill ok" style="white-space:normal;font-size:16px">${esc(t('regDone'))}</span></div>` : ''}
   <form id="loginForm" class="card"><h2>${esc(t('loginTitle'))}</h2>
     <label for="num">${esc(t('loginId'))}</label><input id="num" autocomplete="username" value="${esc(localStorage.getItem('fr_lastid') || '')}" required>
     <label for="pin">${esc(t('pin'))}</label><input id="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="8" required>
@@ -289,7 +290,8 @@ function vHome() {
   let hrs = attendanceRows(mineData(), today, today, S.user.id).filter(r => r.source === 'self').reduce((s, r) => s + (r.hours || 0), 0);
   if (on) hrs += Math.max(0, mins(tnow()) - mins(last.time)) / 60;
   const todays = S.punches.filter(p => p.userId === S.user.id && p.date === today).sort((a, b) => pkey(a).localeCompare(pkey(b)));
-  return `<div class="card"><div class="muted">${esc(t('hello'))}, ${esc(S.user.name)}</div>
+  const hr = new Date().getHours(), greet = t(hr < 12 ? 'gMorning' : hr < 17 ? 'gNoon' : 'gEve');
+  return `<div class="card"><div class="greet">${esc(greet)}, ${esc(S.user.name)}</div>
     <div class="state ${on ? 'on' : ''}">${on ? `${esc(t('workingSince'))} ${last.time}` : esc(t('notWorking'))}</div>
     ${stale ? `<p class="pill warn" style="white-space:normal">${esc(t('openFromBefore'))}</p>` : ''}
     <button class="punch ${on ? 'out' : ''}" data-act="punch" data-type="${on ? 'out' : 'in'}">${esc(t(on ? 'punchOut' : 'punchIn'))}</button>
