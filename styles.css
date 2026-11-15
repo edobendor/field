@@ -107,6 +107,14 @@ td.wrap { white-space: normal; min-width: 160px; }
 td input, td select { padding: 7px; font-size: 14px; min-width: 80px; }
 a { color: var(--brand-d); }
 .consent p { line-height: 1.55; }
+/* install screen: covers the page but leaves the header, so the language can still be changed */
+#install { position: fixed; inset: 52px 0 0 0; background: var(--bg); z-index: 10; padding: 20px 16px; overflow-y: auto; }
+#install[hidden] { display: none; }
+#install .card { max-width: 440px; margin: 0 auto; text-align: center; padding: 24px 18px; }
+#install img { border-radius: 20px; }
+#install h2 { font-size: 22px; margin: 14px 0 8px; }
+#install p { line-height: 1.6; font-size: 17px; }
+#top { min-height: 52px; }
 tr.pending { background: #fff8ec; }
 @media (max-width: 700px) {
   #top { padding: 10px 12px; }

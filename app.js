@@ -485,7 +485,7 @@ document.addEventListener('click', e => {
   actions[el.dataset.act]?.(el);
 });
 document.addEventListener('change', e => {
-  if (e.target.id === 'langSel') { lang = e.target.value; localStorage.setItem('fr_lang', lang); render(); }
+  if (e.target.id === 'langSel') { lang = e.target.value; localStorage.setItem('fr_lang', lang); render(); renderInstall(); }
   if (e.target.id === 'fUser') { filt.user = e.target.value; render(); }
   if (e.target.id === 'fFrom' || e.target.id === 'fTo') { filt.from = $('#fFrom').value || filt.from; filt.to = $('#fTo').value || filt.to; loadAdmin(); }
 });
@@ -547,10 +547,40 @@ document.addEventListener('submit', async e => {
   }
 });
 
+// ---------- install to home screen ----------
+// Shown as the first thing on every visit until the app is installed. A browser only lets a page
+// open its install dialog after a tap, so the screen has one big button. iPhones have no install
+// dialog at all, so there the screen explains the two taps in Safari.
+let installEvt = null;
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
+function renderInstall() {
+  const el = $('#install');
+  const skipped = (() => { try { return sessionStorage.getItem('fr_install_skip'); } catch (e) { return null; } })();
+  const show = !isStandalone() && !skipped && (installEvt || isIos());
+  el.hidden = !show;
+  el.innerHTML = !show ? '' : `<div class="card">
+    <img src="icon.svg" alt="" width="84" height="84">
+    <h2>${esc(t('installTitle'))}</h2>
+    <p>${esc(t(installEvt ? 'installText' : 'installIos'))}</p>
+    ${installEvt ? `<button class="btn" data-act="install">${esc(t('installBtn'))}</button>` : ''}
+    <button class="btn sec" data-act="skipInstall">${esc(t('installSkip'))}</button></div>`;
+}
+actions.install = async () => {
+  if (!installEvt) return;
+  installEvt.prompt();
+  try { await installEvt.userChoice; } catch (e) { /* dialog closed */ }
+  installEvt = null; renderInstall();
+};
+actions.skipInstall = () => { try { sessionStorage.setItem('fr_install_skip', '1'); } catch (e) { /* private mode */ } renderInstall(); };
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; renderInstall(); });
+window.addEventListener('appinstalled', () => { installEvt = null; renderInstall(); });
+
 window.addEventListener('online', sync);
 setInterval(() => { if (myOutbox().length) sync(); }, 60000);
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 render();
+renderInstall();
 if (S.token) { if (view === 'admin') loadAdmin(); sync(); }
