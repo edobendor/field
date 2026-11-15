@@ -28,6 +28,7 @@ const L = {
     dHarvest: 'תאריך קטיף', dStorage: 'תאריך הוצאה מקירור', photos: 'תמונות', addPhoto: '📷 צלם או בחר תמונות',
     decision: 'החלטה (לא חובה)', d_keep: 'להמשיך לעקוב', d_graft: 'להרכיב', d_advance: 'לקדם', d_discard: 'לפסול', save: 'שמור',
     saved: 'נשמר', savedOffline: 'נשמר בטלפון, יישלח כשתהיה קליטה', nothing: 'אין מה לשמור: הוסף תמונה או נתון אחד לפחות',
+    installTitle: 'התקנה בטלפון', installBtn: 'התקנת האפליקציה', installIos: 'באייפון: לפתוח ב-Safari, ללחוץ על כפתור השיתוף ואז "הוסף למסך הבית".', installHint: 'כדי להתקין כאפליקציה: לפתוח את הכתובת הזאת בדפדפן Chrome עצמו (לא מתוך וואטסאפ ולא מתוך אפליקציית דיווח שטח).',
     badValue: 'ערך לא סביר', badPhoto: 'לא ניתן לקרוא את התמונה',
     f_plot: 'מיקום', ph_plot: 'אתר / חלקה / שורה', f_size: 'גודל פרי (מ"מ)', f_sizeClass: 'מיון גודל', ph_sizeClass: 'למשל A/AA/B', f_brix: 'בריקס', f_firm: 'מוצקות (ק"ג)',
     f_yield: 'צפי יבול', h_yield: '1 = נמוך · 3 = בינוני · 5 = גבוה מאוד', f_taste: 'טעם',
@@ -49,6 +50,7 @@ const L = {
     dHarvest: 'Harvest date', dStorage: 'Date out of cold storage', photos: 'Photos', addPhoto: '📷 Take or choose photos',
     decision: 'Decision (optional)', d_keep: 'Keep following', d_graft: 'Graft', d_advance: 'Advance', d_discard: 'Discard', save: 'Save',
     saved: 'Saved', savedOffline: 'Saved on the phone, will be sent when there is reception', nothing: 'Nothing to save: add a photo or at least one value',
+    installTitle: 'Install on this phone', installBtn: 'Install the app', installIos: 'On iPhone: open in Safari, tap the Share button, then "Add to Home Screen".', installHint: 'To install as an app: open this address in Chrome itself (not inside WhatsApp or another app).',
     badValue: 'value out of range', badPhoto: 'The photo could not be read',
     f_plot: 'Location', ph_plot: 'Site / block / row', f_size: 'Fruit size (mm)', f_sizeClass: 'Size classes', ph_sizeClass: 'e.g. A/AA/B', f_brix: 'Brix', f_firm: 'Pressure (kg)',
     f_yield: 'Yield expectation', h_yield: '1 = low · 3 = medium · 5 = very high', f_taste: 'Taste',
@@ -169,6 +171,22 @@ async function loadCode(code) {
   } catch (e) { /* offline: the copy kept on the phone is shown */ }
 }
 
+// ---------- install to the home screen ----------
+// A browser only opens its install dialog after a tap, so there is a button. iPhones have no dialog:
+// they get the two Safari steps. Inside WhatsApp or another app's window nothing can be installed,
+// so a hint says to open the address in the browser itself.
+let installEvt = null;
+const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; if (view !== 'form') render(); });
+window.addEventListener('appinstalled', () => { installEvt = null; if (view !== 'form') render(); });
+function installCard() {
+  if (standalone()) return '';
+  const body = installEvt ? `<button class="btn" data-act="install" style="margin-top:0">⬇ ${esc(t('installBtn'))}</button>`
+    : `<p class="muted" style="margin:0">${esc(t(isIos() ? 'installIos' : 'installHint'))}</p>`;
+  return `<div class="card"><h2>${esc(t('installTitle'))}</h2>${body}</div>`;
+}
+
 // ---------- screens ----------
 function renderTop() {
   const n = waiting();
@@ -191,7 +209,7 @@ function vLogin() {
   return `<form id="loginForm" class="card"><h2>${esc(t('loginTitle'))}</h2>
     <label for="lUser">${esc(t('user'))}</label><input id="lUser" autocomplete="username" autocapitalize="none" value="${esc(localStorage.getItem('br_lastuser') || '')}" required>
     <label for="lPin">${esc(t('pin'))}</label><input id="lPin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="8" required>
-    <button class="btn" id="loginBtn">${esc(t('login'))}</button></form>`;
+    <button class="btn" id="loginBtn">${esc(t('login'))}</button></form>${installCard()}`;
 }
 function vHome() {
   const teams = B.me.admin && B.me.teams && B.me.teams.length > 1
@@ -199,7 +217,7 @@ function vHome() {
   return `${teams}<div class="card"><h2>${esc(t('code'))}</h2>
     <form id="find"><input id="code" class="codein" autocomplete="off" autocapitalize="characters" placeholder="${myTeam() === 'Cultirex' ? '07C07-10' : 'AS-5-13-68'}">
     <button class="btn">${esc(t('open'))}</button></form></div>
-  <div class="card"><h2>${esc(t('recent'))}</h2><div id="recent">${recentHtml()}</div></div>`;
+  <div class="card"><h2>${esc(t('recent'))}</h2><div id="recent">${recentHtml()}</div></div>${installCard()}`;
 }
 function recentHtml() {
   const q = ckey($('#code') ? $('#code').value : '');
@@ -294,6 +312,7 @@ function openCode(code) {
 // ---------- actions ----------
 const actions = {
   sync() { sync(); },
+  async install() { if (!installEvt) return; installEvt.prompt(); try { await installEvt.userChoice; } catch (e) { /* closed */ } installEvt = null; render(); },
   logout() { if (waiting() && !confirm('⏳ ' + waiting())) return; B = { ...EMPTY, evals: B.evals, photos: B.photos }; persist(); view = 'home'; render(); },
   home() { view = 'home'; render(); loadCodes(); },
   card() { view = 'card'; form = null; render(); },
