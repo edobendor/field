@@ -218,6 +218,11 @@ function render() {
   if (view === 'admin') app.className = 'wide';
   app.innerHTML = ({ home: vHome, report: vReport, mine: vMine, admin: vAdmin })[view]();
   if (view === 'report') afterReport();
+  // On a phone each table row is shown as a card; every cell needs its column name.
+  $$('table', app).forEach(tb => {
+    const heads = $$('th', tb).map(h => h.textContent);
+    $$('tbody tr', tb).forEach(tr => [...tr.children].forEach((td, i) => { td.dataset.label = heads[i] || ''; }));
+  });
 }
 
 function vLogin() {
@@ -317,8 +322,8 @@ function vAdmin() {
   const filters = `<div class="filters">
     <div><label for="fFrom">${esc(t('from'))}</label><input id="fFrom" type="date" value="${filt.from}"></div>
     <div><label for="fTo">${esc(t('to'))}</label><input id="fTo" type="date" value="${filt.to}"></div>
-    <div><label for="fUser">${esc(t('worker'))}</label><select id="fUser"><option value="">${esc(t('all'))}</option>${A.users.map(u => `<option value="${u.id}"${filt.user === u.id ? ' selected' : ''}>${esc(u.name)}</option>`).join('')}</select></div>
-    <div><button class="btn small sec" data-act="reload">⟳ ${esc(t('refresh'))}</button> <button class="btn small" data-act="csv">⬇ ${esc(t('exportCsv'))}</button></div></div>`;
+    <div class="f-user"><label for="fUser">${esc(t('worker'))}</label><select id="fUser"><option value="">${esc(t('all'))}</option>${A.users.map(u => `<option value="${u.id}"${filt.user === u.id ? ' selected' : ''}>${esc(u.name)}</option>`).join('')}</select></div>
+    <div class="f-btns"><button class="btn small sec" data-act="reload">⟳ ${esc(t('refresh'))}</button> <button class="btn small" data-act="csv">⬇ ${esc(t('exportCsv'))}</button></div></div>`;
   const tbl = (cols, rows) => rows.length ? `<div class="scroll"><table><thead><tr>${cols.map(c => `<th>${esc(t(c))}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>` : `<div class="muted">${esc(t('noRows'))}</div>`;
   let body = '';
   if (adminTab === 'att') {
