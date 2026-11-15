@@ -140,6 +140,7 @@ const locText = l => !l ? '' : l.lat == null ? t('noGps') : `${l.lat}, ${l.lng}`
 
 // ---------- view state ----------
 let view = 'home', adminTab = 'att';
+let regMode = false, regDone = false;   // login screen: registration form / "registration received" notice
 let pending = [];      // attachments in the open report form: {id, blob, name, kind}
 let recorder = null;
 let A = null, aBusy = false, aErr = false;   // manager data for the chosen date range
@@ -228,10 +229,20 @@ function render() {
 }
 
 function vLogin() {
-  return `<form id="loginForm" class="card"><h2>${esc(t('loginTitle'))}</h2>
-    <label for="num">${esc(t('workerNum'))}</label><input id="num" inputmode="numeric" autocomplete="username" required>
+  if (regMode) return `<form id="regForm" class="card"><h2>${esc(t('regTitle'))}</h2>
+    <label for="gName">${esc(t('fullName'))}</label><input id="gName" autocomplete="name" maxlength="60" required>
+    <label for="gId">${esc(t('idnum'))}</label><input id="gId" autocomplete="off" maxlength="15" required>
+    <label for="gPhone">${esc(t('phone'))}</label><input id="gPhone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20">
+    <label for="gPin">${esc(t('choosePin'))}</label><input id="gPin" type="password" inputmode="numeric" autocomplete="new-password" minlength="4" maxlength="8" required>
+    <label for="gPin2">${esc(t('pinAgain'))}</label><input id="gPin2" type="password" inputmode="numeric" autocomplete="new-password" minlength="4" maxlength="8" required>
+    <button class="btn" id="regBtn">${esc(t('register'))}</button>
+    <button type="button" class="btn sec" data-act="hideReg">${esc(t('backToLogin'))}</button></form>`;
+  return `${regDone ? `<div class="card"><span class="pill ok" style="white-space:normal;font-size:16px">${esc(t('regDone'))}</span></div>` : ''}
+  <form id="loginForm" class="card"><h2>${esc(t('loginTitle'))}</h2>
+    <label for="num">${esc(t('loginId'))}</label><input id="num" autocomplete="username" value="${esc(localStorage.getItem('fr_lastid') || '')}" required>
     <label for="pin">${esc(t('pin'))}</label><input id="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="8" required>
-    <button class="btn" id="loginBtn">${esc(t('login'))}</button></form>`;
+    <button class="btn" id="loginBtn">${esc(t('login'))}</button>
+    <button type="button" class="btn sec" data-act="showReg">${esc(t('newWorker'))}</button></form>`;
 }
 function vConsent() {
   return `<div class="card consent"><h2>${esc(t('consentTitle'))}</h2>
@@ -321,7 +332,8 @@ function vAdmin() {
   if (!A || aErr) return `<div class="card"><p class="muted">${esc(aErr ? t('offline') : t('loading'))}</p><button class="btn small" data-act="reload">${esc(t('retry'))}</button></div>`;
   const tabs = [['att', 'tabAtt'], ['sum', 'tabSum'], ['rep', 'tabRep']];
   if (S.user.role === 'admin') tabs.push(['users', 'tabUsers']); else if (adminTab === 'users') adminTab = 'att';
-  const head = `<div class="tabs">${tabs.map(([k, l]) => `<button data-act="tab" data-tab="${k}" class="${adminTab === k ? 'sel' : ''}">${esc(t(l))}</button>`).join('')}</div>`;
+  const waiting = A.users.filter(u => u.pending).length;
+  const head = `<div class="tabs">${tabs.map(([k, l]) => `<button data-act="tab" data-tab="${k}" class="${adminTab === k ? 'sel' : ''}">${esc(t(l))}${k === 'users' && waiting ? ` (${waiting})` : ''}</button>`).join('')}</div>`;
   const filters = `<div class="filters">
     <div><label for="fFrom">${esc(t('from'))}</label><input id="fFrom" type="date" value="${filt.from}"></div>
     <div><label for="fTo">${esc(t('to'))}</label><input id="fTo" type="date" value="${filt.to}"></div>
@@ -343,11 +355,15 @@ function vAdmin() {
       <td>${r.qty ?? ''}</td><td>${r.qty != null ? esc(t('unit_' + r.unit)) : ''}</td><td>${locPill(r.loc)}</td><td class="wrap">${esc(r.notes)}</td>
       <td>${r.media.map(m => `<a href="${esc(m.url)}" target="_blank" rel="noopener" title="${esc(m.name)}">${kindIcon(m.kind)}</a>`).join(' ')}</td></tr>`));
   } else {
-    body = `<div class="scroll"><table><thead><tr><th>${esc(t('workerNum'))}</th><th>${esc(t('name'))}</th><th>${esc(t('role'))}</th><th>${esc(t('pin'))}</th><th>${esc(t('active'))}</th></tr></thead><tbody>
-      ${A.users.map(u => `<tr data-id="${u.id}"><td><input data-f="num" value="${esc(u.num)}" inputmode="numeric" style="width:80px"></td><td><input data-f="name" value="${esc(u.name)}"></td>
+    // People waiting for approval come first. Ticking "active" and saving approves them.
+    const list = A.users.slice().sort((a, b) => (b.pending ? 1 : 0) - (a.pending ? 1 : 0));
+    body = `${waiting ? `<p class="pill warn" style="white-space:normal;font-size:15px">${esc(t('approveHelp'))}</p>` : ''}
+      <div class="scroll"><table><thead><tr><th>${esc(t('workerNum'))}</th><th>${esc(t('name'))}</th><th>${esc(t('idnum'))}</th><th>${esc(t('phone'))}</th><th>${esc(t('role'))}</th><th>${esc(t('pin'))}</th><th>${esc(t('active'))}</th></tr></thead><tbody>
+      ${list.map(u => `<tr data-id="${u.id}"${u.pending ? ' class="pending"' : ''}><td><input data-f="num" value="${esc(u.num)}" inputmode="numeric" style="width:70px"></td><td><input data-f="name" value="${esc(u.name)}"></td>
+        <td><input data-f="idnum" value="${esc(u.idnum || '')}" maxlength="15" style="width:130px"></td><td><input data-f="phone" value="${esc(u.phone || '')}" inputmode="tel" maxlength="20" style="width:130px"></td>
         <td><select data-f="role">${['worker', 'leader', 'viewer', 'admin'].map(r => `<option value="${r}"${u.role === r ? ' selected' : ''}>${esc(t('role_' + r))}</option>`).join('')}</select></td>
-        <td><input data-f="pin" value="${esc(u.pin)}" inputmode="numeric" maxlength="8" style="width:110px"></td>
-        <td><input data-f="active" type="checkbox" style="width:22px;height:22px"${u.active ? ' checked' : ''}></td></tr>`).join('')}
+        <td><input data-f="pin" value="${esc(u.pin)}" inputmode="numeric" maxlength="8" style="width:100px"></td>
+        <td><span>${u.pending ? `<span class="pill warn">${esc(t('pendingBadge'))}</span> ` : ''}<input data-f="active" type="checkbox" style="width:22px;height:22px;vertical-align:middle"${u.active ? ' checked' : ''}></span></td></tr>`).join('')}
       </tbody></table></div><div class="row" style="margin-top:12px"><button class="btn small sec" data-act="addUser">+ ${esc(t('add'))}</button><button class="btn small" data-act="saveUsers">${esc(t('save'))}</button></div>`;
   }
   return head + `<div class="card">${body}</div>`;
@@ -416,16 +432,19 @@ const actions = {
   addUser() {
     readUsers();
     const next = Math.max(0, ...A.users.map(u => parseInt(u.num, 10) || 0)) + 1;
-    A.users.push({ id: uid(), num: String(next), name: '', role: 'worker', pin: newPin(), active: true }); render();
+    A.users.push({ id: uid(), num: String(next), name: '', role: 'worker', pin: newPin(), active: true, pending: false, idnum: '', phone: '' }); render();
   },
   async saveUsers() {
     readUsers();
     try {
-      const j = await api('saveUsers', { users: A.users.filter(u => u.name) });
+      // Every row is sent: one whose name was cleared is deleted by the server.
+      const j = await api('saveUsers', { users: A.users });
       if (j.ok) { A.users = j.users; render(); toast(t('saved')); }
-      else toast(t(j.error === 'dup_num' ? 'dupNum' : j.error === 'need_admin' ? 'needAdmin' : 'serverErr'));
+      else toast(t({ dup_num: 'dupNum', dup_id: 'dupId', need_admin: 'needAdmin' }[j.error] || 'serverErr'));
     } catch (e) { toast(t('offline')); }
-  }
+  },
+  showReg() { regMode = true; regDone = false; render(); },
+  hideReg() { regMode = false; render(); }
 };
 
 document.addEventListener('click', e => {
@@ -444,14 +463,26 @@ document.addEventListener('submit', async e => {
     try {
       const j = await api('login', { num: $('#num').value.trim(), pin: $('#pin').value });
       if (j.ok) {
+        localStorage.setItem('fr_lastid', $('#num').value.trim()); regDone = false;
         S.token = j.token; applyState(j.state); persist();
         view = isMgr() ? 'admin' : 'home'; render();
         if (view === 'admin' && S.consent) loadAdmin();
         sync(); return;
       }
-      toast(t(j.error === 'locked' ? 'locked' : j.error === 'bad_login' ? 'badLogin' : 'serverErr'));
+      toast(t({ locked: 'locked', bad_login: 'badLogin', pending: 'pendingMsg' }[j.error] || 'serverErr'));
     } catch (err) { toast(t('offline')); }
     btn.disabled = false; $('#pin').value = '';
+  }
+  if (e.target.id === 'regForm') {
+    if ($('#gPin').value !== $('#gPin2').value) return toast(t('pinMismatch'));
+    const btn = $('#regBtn'); btn.disabled = true;
+    try {
+      const idnum = $('#gId').value.trim();
+      const j = await api('register', { name: $('#gName').value.trim(), idnum, phone: $('#gPhone').value.trim(), pin: $('#gPin').value, lang });
+      if (j.ok) { localStorage.setItem('fr_lastid', idnum); regMode = false; regDone = true; render(); window.scrollTo(0, 0); return; }
+      toast(t({ invalid: 'regInvalid', exists: 'regExists' }[j.error] || 'serverErr'));
+    } catch (err) { toast(t('offline')); }
+    btn.disabled = false;
   }
   if (e.target.id === 'repForm') {
     const start = $('#rStart').value, end = $('#rEnd').value, brk = parseInt($('#rBreak').value, 10) || 0;

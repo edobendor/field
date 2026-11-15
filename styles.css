@@ -107,6 +107,7 @@ td.wrap { white-space: normal; min-width: 160px; }
 td input, td select { padding: 7px; font-size: 14px; min-width: 80px; }
 a { color: var(--brand-d); }
 .consent p { line-height: 1.55; }
+tr.pending { background: #fff8ec; }
 @media (max-width: 700px) {
   #top { padding: 10px 12px; }
   #top .title { font-size: 16px; }
