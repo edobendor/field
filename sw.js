@@ -1,6 +1,6 @@
 // Network first, cache fallback: the app keeps opening in the field without reception.
-const CACHE = 'field-reports-v16';
-const FILES = ['./', 'index.html', 'styles.css', 'config.js', 'i18n.js', 'app.js', 'icon.svg', 'login.jpg', 'manifest.webmanifest', 'breeding/', 'breeding/breeding.js', 'breeding/icon.svg', 'breeding/manifest.webmanifest'];
+const CACHE = 'field-reports-v17';
+const FILES = ['./', 'index.html', 'styles.css', 'config.js', 'i18n.js', 'app.js', 'icon.svg', 'login.jpg', 'manifest.webmanifest', 'breeding/', 'breeding/breeding.js', 'breeding/icon-192.png', 'breeding/icon-512.png', 'breeding/manifest.webmanifest'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
