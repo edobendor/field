@@ -131,14 +131,36 @@ function queue(op, rec, id = uid()) {
 }
 
 // ---------- location ----------
+// A cold GPS often needs more than 15 seconds for its first fix, so two requests run side by side:
+// a precise one (GPS) and a coarse one (network). The precise fix wins when it arrives in time;
+// otherwise the coarse one is used. posDenied tells the caller the phone blocked location.
+let posDenied = false;
 function getPos() {
   return new Promise(res => {
     const none = { lat: null, lng: null, acc: null };
     if (!navigator.geolocation) return res(none);
-    navigator.geolocation.getCurrentPosition(
-      p => res({ lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6), acc: Math.round(p.coords.accuracy) }),
-      () => res(none), { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+    let best = null, done = false, errs = 0, late = false, t1 = 0, t2 = 0;
+    posDenied = false;
+    const finish = () => { if (done) return; done = true; clearTimeout(t1); clearTimeout(t2); res(best || none); };
+    const ok = (p, fine) => {
+      const v = { lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6), acc: Math.round(p.coords.accuracy) };
+      if (!best || v.acc < best.acc) best = v;
+      if (fine || late || best.acc <= 50) finish();
+    };
+    const fail = e => { if (e && e.code === 1) { posDenied = true; finish(); } else if (++errs === 2) finish(); };
+    navigator.geolocation.getCurrentPosition(p => ok(p, true), fail, { enableHighAccuracy: true, timeout: 25000, maximumAge: 0 });
+    navigator.geolocation.getCurrentPosition(p => ok(p, false), fail, { enableHighAccuracy: false, timeout: 12000, maximumAge: 60000 });
+    t1 = setTimeout(() => { late = true; if (best) finish(); }, 8000);
+    t2 = setTimeout(finish, 27000);
   });
+}
+// Called when the home screen opens: the phone asks for the location permission before the first
+// clock-in, and the GPS is already awake when the worker taps. Nothing is kept from this reading.
+let warmed = false;
+function warmPos() {
+  if (warmed || !navigator.geolocation) return;
+  warmed = true;
+  navigator.geolocation.getCurrentPosition(() => {}, () => {}, { enableHighAccuracy: true, timeout: 25000, maximumAge: 0 });
 }
 function locPill(l) {
   if (!l) return '';
@@ -148,7 +170,7 @@ function locPill(l) {
 const locText = l => !l ? '' : l.lat == null ? t('noGps') : `${l.lat}, ${l.lng}`;
 
 // ---------- view state ----------
-let view = 'home', adminTab = 'att';
+let view = 'home', adminTab = 'dash';
 let regMode = false, regDone = false;   // login screen: registration form / "registration received" notice
 let pending = [];      // attachments in the open report form: {id, blob, name, kind}
 let recorder = null;
@@ -230,6 +252,7 @@ function render() {
   if (view === 'admin') app.className = 'wide';
   app.innerHTML = ({ home: vHome, report: vReport, mine: vMine, admin: vAdmin })[view]();
   if (view === 'report') afterReport();
+  if (view === 'home') warmPos();
   // On a phone each table row is shown as a card; every cell needs its column name.
   $$('table', app).forEach(tb => {
     const heads = $$('th', tb).map(h => h.textContent);
@@ -359,12 +382,14 @@ async function loadAdmin() {
   aBusy = false; render();
 }
 function vAdmin() {
-  if (aBusy) return `<div class="card muted">${esc(t('loading'))}</div>`;
-  if (!A || aErr) return `<div class="card"><p class="muted">${esc(aErr ? t('offline') : t('loading'))}</p><button class="btn small" data-act="reload">${esc(t('retry'))}</button></div>`;
-  const tabs = [['att', 'tabAtt'], ['sum', 'tabSum'], ['rep', 'tabRep']];
-  if (S.user.role === 'admin') tabs.push(['users', 'tabUsers']); else if (adminTab === 'users') adminTab = 'att';
-  const waiting = A.users.filter(u => u.pending).length;
+  const tabs = [['dash', 'tabDash'], ['att', 'tabAtt'], ['sum', 'tabSum'], ['rep', 'tabRep']];
+  if (S.user.role === 'admin') tabs.push(['users', 'tabUsers']); else if (adminTab === 'users') adminTab = 'dash';
+  const src = A || D;
+  const waiting = src ? src.users.filter(u => u.pending).length : 0;
   const head = `<div class="tabs">${tabs.map(([k, l]) => `<button data-act="tab" data-tab="${k}" class="${adminTab === k ? 'sel' : ''}">${esc(t(l))}${k === 'users' && waiting ? ` (${waiting})` : ''}</button>`).join('')}</div>`;
+  if (adminTab === 'dash') return head + vDash(waiting);
+  if (aBusy) return head + `<div class="card muted">${esc(t('loading'))}</div>`;
+  if (!A || aErr) return head + `<div class="card"><p class="muted">${esc(aErr ? t('offline') : t('loading'))}</p><button class="btn small" data-act="reload">${esc(t('retry'))}</button></div>`;
   const filters = `<div class="filters">
     <div><label for="fFrom">${esc(t('from'))}</label><input id="fFrom" type="date" value="${filt.from}"></div>
     <div><label for="fTo">${esc(t('to'))}</label><input id="fTo" type="date" value="${filt.to}"></div>
@@ -408,6 +433,86 @@ function summaryRows() {
   return [...m.values()].map(s => ({ ...s, days: s.dates.size })).sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// ---------- dashboard: one day at a glance ----------
+let D = null, dDay = dstr(new Date()), dBusy = false, dErr = false, dAt = '', dAbsOpen = false;
+const addDays = (s, n) => { const d = new Date(s + 'T12:00:00'); d.setDate(d.getDate() + n); return dstr(d); };
+const openAdmin = () => adminTab === 'dash' ? loadDash(!!D) : loadAdmin();
+async function loadDash(quiet) {
+  const day = dDay;
+  if (!quiet) { dBusy = true; render(); }
+  try { const j = await api('admin', { from: addDays(day, -6), to: day }); if (j.ok) { if (day === dDay) { D = j; dAt = tnow(); } dErr = false; } else dErr = true; }
+  catch (e) { dErr = true; }
+  dBusy = false;
+  if (view === 'admin' && adminTab === 'dash') render();
+}
+// One line per worker for the day. Own clock-in/out counts first; a team leader's report counts
+// only for a worker who did not clock in, so nobody's hours are counted twice.
+function dayStats(day) {
+  const live = day === todayStr(), nowM = mins(tnow()), m = new Map();
+  for (const r of attendanceRows(D, day, day, '')) {
+    if (!m.has(r.userId)) m.set(r.userId, { id: r.userId, name: r.name, self: [], leader: [] });
+    m.get(r.userId)[r.source].push(r);
+  }
+  const reps = D.reports.filter(r => r.date === day);
+  const people = [...m.values()].map(p => {
+    const rows = p.self.length ? p.self : p.leader, last = p.self[p.self.length - 1];
+    const open = last && last.tin && !last.tout ? last : null, on = !!open && live;
+    let hours = rows.reduce((a, r) => a + (r.hours || 0), 0);
+    if (on) hours += Math.max(0, nowM - mins(open.tin)) / 60;
+    return { id: p.id, name: p.name, on, hours, byLeader: !p.self.length ? rows[0].by : '',
+      missing: p.self.some(r => !r.tin || (!r.tout && !(on && r === open))),
+      tin: rows[0].tin, tout: on ? '' : rows[rows.length - 1].tout, loc: rows[0].lin,
+      hasReport: reps.some(r => r.userId === p.id || r.crew.includes(p.id)) };
+  }).sort((a, b) => (b.on - a.on) || a.name.localeCompare(b.name));
+  const absent = D.users.filter(u => u.active && !u.pending && (u.role === 'worker' || u.role === 'leader') && !m.has(u.id));
+  return { live, people, reps, absent, hours: people.reduce((a, p) => a + p.hours, 0) };
+}
+function vDash(waiting) {
+  const today = todayStr(), rtl = lang !== 'th';
+  const nav = `<div class="dnav"><button data-act="dStep" data-n="-1" aria-label="prev">${rtl ? '▶' : '◀'}</button>
+    <input id="dDate" type="date" value="${dDay}" max="${today}">
+    <button data-act="dStep" data-n="1" aria-label="next"${dDay >= today ? ' disabled' : ''}>${rtl ? '◀' : '▶'}</button>
+    <button data-act="dToday"${dDay === today ? ' class="sel"' : ''}>${esc(t('today'))}</button></div>`;
+  if (dBusy) return nav + `<div class="card muted">${esc(t('loading'))}</div>`;
+  if (!D) return nav + `<div class="card"><p class="muted">${esc(dErr ? t('offline') : t('loading'))}</p><button class="btn small" data-act="dReload">${esc(t('retry'))}</button></div>`;
+  const st = dayStats(dDay), onN = st.people.filter(p => p.on).length, missN = st.people.filter(p => p.missing).length;
+  const noRep = st.people.filter(p => !p.on && !p.hasReport).length;
+  const activeN = st.people.length + st.absent.length;
+  const kpi = (n, label, sub, cls) => `<div class="kpi${cls ? ' ' + cls : ''}"><b>${n}</b><span>${esc(label)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</div>`;
+  const kpis = `<div class="kpis">
+    ${st.live ? kpi(onN, t('dNow'), '', onN ? 'on' : '') : kpi(missN, t('missingOut'), '', missN ? 'warn' : '')}
+    ${kpi(st.people.length, t('dWorked'), `${t('dOf')} ${activeN} ${t('dActive')}`)}
+    ${kpi(h2(st.hours), t('dHours'), st.live && onN ? t('dSoFar') : '')}
+    ${kpi(st.reps.length, t('dReports'), noRep ? `${t('dNoReport')}: ${noRep}` : '', noRep ? 'warn' : '')}</div>`;
+  const alerts = [
+    waiting && S.user.role === 'admin' ? `<button class="pill warn" data-act="tab" data-tab="users">${esc(t('dWaiting'))}: ${waiting}</button>` : '',
+    st.live && missN ? `<span class="pill bad">${esc(t('missingOut'))}: ${missN}</span>` : ''
+  ].filter(Boolean).join(' ');
+  const week = [6, 5, 4, 3, 2, 1, 0].map(i => { const d = addDays(dDay, -i), s = dayStats(d); return { d, n: s.people.length, h: s.hours }; });
+  const maxH = Math.max(1, ...week.map(w => w.h));
+  const wd = d => new Date(d + 'T12:00:00').toLocaleDateString(lang === 'th' ? 'th-TH' : lang === 'ar' ? 'ar' : 'he-IL', { weekday: 'narrow' });
+  const chart = `<div class="card"><h2>${esc(t('dWeek'))}</h2><div class="week">${week.map(w => `<button data-act="dGo" data-d="${w.d}" class="${w.d === dDay ? 'sel' : ''}" title="${h2(w.h)} ${esc(t('hours'))}">
+      <span class="n">${w.n || ''}</span><span class="bar" style="height:${Math.round(84 * w.h / maxH)}px"></span><span>${esc(wd(w.d))}</span><span>${w.d.slice(8)}.${w.d.slice(5, 7)}</span></button>`).join('')}</div>
+    <div class="muted" style="margin-top:8px;font-size:13px">${esc(t('dWeekHelp'))}</div></div>`;
+  const status = p => p.on ? `<span class="pill ok">● ${esc(t('dOn'))}</span>` : p.missing ? `<span class="pill bad">${esc(t('missingOut'))}</span>` : `<span class="pill">${esc(t('dDone'))}</span>`;
+  const list = `<div class="card"><h2>${esc(t('dPeople'))} (${st.people.length})</h2>${st.people.length ? `<ul class="list plist">${st.people.map(p => `<li>
+      <span><b>${esc(p.name)}</b> ${status(p)}<br><span class="muted">${p.tin || '--:--'} - ${p.tout || '--:--'}${p.byLeader ? ` · ${esc(t('srcLeader'))}: ${esc(p.byLeader)}` : ''} · ${locPill(p.loc)}
+      ${p.on ? '' : ` · <span class="pill ${p.hasReport ? 'ok' : 'warn'}">${esc(t('dRep'))} ${p.hasReport ? '✓' : '✗'}</span>`}</span></span>
+      <b class="hrs">${h2(p.hours)}</b></li>`).join('')}</ul>` : `<div class="muted">${esc(t('dNone'))}</div>`}
+    ${st.absent.length ? `<details id="dAbs"${dAbsOpen ? ' open' : ''}><summary>${esc(t('dAbsent'))} (${st.absent.length})</summary><div class="muted">${st.absent.map(u => esc(u.name)).join(', ')}</div></details>` : ''}</div>`;
+  const acts = new Map();
+  for (const r of st.reps) {
+    if (!acts.has(r.activity)) acts.set(r.activity, { n: 0, wh: 0, q: new Map() });
+    const a = acts.get(r.activity), n = r.crew.length + r.extra; a.n += n; a.wh += r.hours * n;
+    if (r.qty != null) a.q.set(r.unit, (a.q.get(r.unit) || 0) + r.qty);
+  }
+  const work = st.reps.length ? `<div class="card"><h2>${esc(t('dActs'))}</h2><ul class="list">${[...acts].map(([k, a]) => `<li>
+      <span><b>${esc(t('act_' + k))}</b><br><span class="muted">${a.n} ${esc(t('workers'))}${[...a.q].map(([u, q]) => ` · ${q} ${esc(t('unit_' + u))}`).join('')}</span></span><b class="hrs">${h2(a.wh)}</b></li>`).join('')}</ul></div>` : '';
+  const foot = `<div class="dfoot"><span class="muted">${esc(t('dUpdated'))} ${dAt}${st.live ? ' · ' + esc(t('dAuto')) : ''}${dErr ? ' · ' + esc(t('offline')) : ''}</span>
+    <span><button class="btn small sec" data-act="dReload">⟳ ${esc(t('refresh'))}</button> <button class="btn small" data-act="dCsv">⬇ ${esc(t('dExport'))}</button></span></div>`;
+  return nav + kpis + (alerts ? `<p>${alerts}</p>` : '') + list + work + chart + foot;
+}
+
 // ---------- actions ----------
 function readUsers() {
   $$('tbody tr[data-id]').forEach(tr => {
@@ -420,8 +525,17 @@ const actions = {
   logout() { if (myOutbox().length && !confirm(t('unsentWarn'))) return; signOutLocal(); render(); },
   syncNow() { sync(); },
   agree() { S.consent = true; queue('consent', { lang }); render(); },
-  go(el) { view = el.dataset.view; render(); window.scrollTo(0, 0); if (view === 'admin') loadAdmin(); else sync(); },
-  tab(el) { adminTab = el.dataset.tab; render(); },
+  go(el) { view = el.dataset.view; render(); window.scrollTo(0, 0); if (view === 'admin') openAdmin(); else sync(); },
+  tab(el) { adminTab = el.dataset.tab; render(); window.scrollTo(0, 0); if (adminTab === 'dash') loadDash(!!D); else if (!A) loadAdmin(); },
+  dStep(el) { const d = addDays(dDay, +el.dataset.n); if (d > todayStr()) return; dDay = d; loadDash(); },
+  dGo(el) { if (el.dataset.d === dDay) return; dDay = el.dataset.d; loadDash(); },
+  dToday() { dDay = todayStr(); loadDash(); },
+  dReload() { loadDash(!!D && !dErr); },
+  dCsv() {
+    const st = dayStats(dDay);
+    downloadCsv(`day_${dDay}.csv`, ['date', 'worker', 'in', 'out', 'hours', 'status', 'dRep', 'location', 'source'].map(t),
+      st.people.map(p => [dshow(dDay), p.name, p.tin, p.tout, h2(p.hours), t(p.on ? 'dOn' : p.missing ? 'missingOut' : 'dDone'), p.hasReport ? '✓' : '', locText(p.loc), p.byLeader ? t('srcLeader') + ': ' + p.byLeader : t('srcSelf')]));
+  },
   reload() { loadAdmin(); },
   async punch(el) {
     el.disabled = true; $('#gpsmsg').textContent = t('locating');
@@ -432,7 +546,7 @@ const actions = {
     queue('punch', rec, id);
     if (type === 'out' && !todayReport()) { view = 'report'; window.scrollTo(0, 0); }   // the day's report is filled in at clock-out
     render();
-    toast(`${t(type === 'in' ? 'savedIn' : 'savedOut')} · ${t(pos.lat == null ? 'noGps' : 'withLoc')}`);
+    toast(`${t(type === 'in' ? 'savedIn' : 'savedOut')} · ${t(pos.lat == null ? (posDenied ? 'gpsDenied' : 'noGps') : 'withLoc')}`);
   },
   attach() { $('#rFiles').click(); },
   unattach(el) { pending = pending.filter(a => a.id !== el.dataset.id); drawAtt(); },
@@ -486,6 +600,7 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('change', e => {
   if (e.target.id === 'langSel') { lang = e.target.value; localStorage.setItem('fr_lang', lang); render(); renderInstall(); }
+  if (e.target.id === 'dDate') { const v = e.target.value; if (v && v <= todayStr()) { dDay = v; loadDash(); } else render(); }
   if (e.target.id === 'fUser') { filt.user = e.target.value; render(); }
   if (e.target.id === 'fFrom' || e.target.id === 'fTo') { filt.from = $('#fFrom').value || filt.from; filt.to = $('#fTo').value || filt.to; loadAdmin(); }
 });
@@ -499,7 +614,7 @@ document.addEventListener('submit', async e => {
         localStorage.setItem('fr_lastid', $('#num').value.trim()); regDone = false;
         S.token = j.token; applyState(j.state); persist();
         view = isMgr() ? 'admin' : 'home'; render();
-        if (view === 'admin' && S.consent) loadAdmin();
+        if (view === 'admin' && S.consent) openAdmin();
         sync(); return;
       }
       toast(t({ locked: 'locked', bad_login: 'badLogin', pending: 'pendingMsg' }[j.error] || 'serverErr'));
@@ -547,6 +662,10 @@ document.addEventListener('submit', async e => {
   }
 });
 
+// The dashboard refreshes by itself once a minute while it is on screen.
+setInterval(() => { if (S.user && view === 'admin' && adminTab === 'dash' && D && !dBusy && !document.hidden) loadDash(true); }, 60000);
+document.addEventListener('toggle', e => { if (e.target.id === 'dAbs') dAbsOpen = e.target.open; }, true);
+
 // ---------- install to home screen ----------
 // Shown as the first thing on every visit until the app is installed. A browser only lets a page
 // open its install dialog after a tap, so the screen has one big button. iPhones have no install
@@ -583,4 +702,4 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 }
 render();
 renderInstall();
-if (S.token) { if (view === 'admin') loadAdmin(); sync(); }
+if (S.token) { if (view === 'admin') openAdmin(); sync(); }

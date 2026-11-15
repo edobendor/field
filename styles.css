@@ -116,6 +116,33 @@ a { color: var(--brand-d); }
 #install p { line-height: 1.6; font-size: 17px; }
 #top { min-height: 52px; }
 tr.pending { background: #fff8ec; }
+/* dashboard */
+.dnav { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+.dnav input { flex: 1; min-width: 0; text-align: center; font-weight: 700; padding: 11px 6px; }
+.dnav button { flex: none; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: #fff; font-size: 16px; color: var(--brand-d); }
+.dnav button.sel { background: var(--brand); color: #fff; border-color: var(--brand); }
+.dnav button:disabled { opacity: .35; }
+.kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+@media (min-width: 800px) { .kpis { grid-template-columns: repeat(4, 1fr); } }
+.kpi { background: var(--card); border-radius: 14px; padding: 14px; box-shadow: 0 1px 4px rgba(0,0,0,.07); border-inline-start: 5px solid var(--line); }
+.kpi b { display: block; font-size: 32px; line-height: 1.1; color: var(--brand-d); }
+.kpi span { font-size: 15px; font-weight: 600; }
+.kpi small { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
+.kpi.on { border-color: #2e9e5b; } .kpi.on b { color: #1f7a43; }
+.kpi.warn { border-color: var(--amber); } .kpi.warn small { color: var(--amber); font-weight: 600; }
+.pill:not(.ok):not(.warn):not(.bad) { background: #eceff3; color: var(--muted); }
+button.pill { border: 0; font-family: inherit; padding: 6px 12px; font-size: 14px; }
+.plist li { align-items: flex-start; }
+.plist .muted { line-height: 1.9; }
+.hrs { font-size: 18px; white-space: nowrap; }
+.week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; height: 150px; }
+.week button { border: 0; background: none; padding: 0; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 2px; font-size: 12px; color: var(--muted); }
+.week .n { font-weight: 700; color: var(--text); font-size: 13px; }
+.week .bar { width: 70%; background: #a9c8e3; border-radius: 6px 6px 0 0; min-height: 3px; }
+.week .sel .bar { background: var(--brand); }
+.week .sel { color: var(--text); font-weight: 700; }
+details { margin-top: 12px; } summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+.dfoot { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; font-size: 14px; }
 @media (max-width: 700px) {
   #top { padding: 10px 12px; }
   #top .title { font-size: 16px; }
