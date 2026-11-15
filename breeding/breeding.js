@@ -218,6 +218,8 @@ function history(code) {
   const key = e => e.date + (e.kind === 'storage' ? '1' : '0');
   return { evals: evals.sort((a, b) => key(b).localeCompare(key(a))), photos };
 }
+const isVideo = p => /\.(mp4|mov|webm)$/i.test(p.name || '');
+const BLANK = 'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';   // 1 px, when a video has no preview frame
 function nums(e) {
   const out = [], has = k => e[k] != null && e[k] !== '';
   if (has('size')) out.push(`${esc(t('n_size'))} <b>${esc(e.size)}</b> ${esc(t('n_mm'))}`);
@@ -245,7 +247,7 @@ function vCard() {
       ${e.decision ? `<span class="pill ${e.decision === 'discard' ? 'bad' : 'ok'}">${esc(t('d_' + e.decision))}</span>` : ''}</div>
       <div class="nums">${nums(e)}</div>${texts(e)}
       <div class="muted" style="font-size:13px">${esc(e.evaluator || '')}</div>
-      <div class="thumbs">${h.photos.filter(p => p.evalId === e.id).map(p => `<img src="data:image/jpeg;base64,${p.thumb}" data-act="zoom" data-id="${p.id}" data-local="${p.local ? 1 : ''}" alt="">`).join('')}</div></div>`).join('')
+      <div class="thumbs">${h.photos.filter(p => p.evalId === e.id).map(p => `<span class="t${isVideo(p) ? ' vid' : ''}" title="${esc(p.name || '')}"><img src="data:image/jpeg;base64,${p.thumb || BLANK}" data-act="zoom" data-id="${p.id}" data-local="${p.local ? 1 : ''}" data-video="${isVideo(p) ? 1 : ''}" alt=""></span>`).join('')}</div></div>`).join('')
     : `<div class="muted">${esc(t('noneFor'))}</div>`}</div>`;
 }
 function fieldHtml(k) {
@@ -308,16 +310,20 @@ const actions = {
   addPhoto() { $('#fFiles').click(); },
   rmPhoto(el) { form.photos = form.photos.filter(p => p.id !== el.dataset.id); drawPhotos(); },
   async zoom(el) {
-    const v = $('#view'); v.hidden = false; v.innerHTML = `<img src="${el.src}" alt="">`;
+    const v = $('#view'), video = !!el.dataset.video; v.hidden = false; v.innerHTML = `<img src="${el.src}" alt="">${video ? '<div class="wait">⟳</div>' : ''}`;
     try {
       let src = '';
       if (el.dataset.local) { const b = await mget(el.dataset.id); if (b) src = URL.createObjectURL(b); }
-      else { const j = await api('bphoto', { id: el.dataset.id }); if (j.ok) src = `data:${j.mime};base64,${j.data}`; }
-      if (src && !v.hidden) v.innerHTML = `<img src="${src}" alt="">`;
+      else {
+        const j = await api('bphoto', { id: el.dataset.id });
+        if (j.ok) src = video ? URL.createObjectURL(await (await fetch(`data:${j.mime};base64,${j.data}`)).blob()) : `data:${j.mime};base64,${j.data}`;
+      }
+      if (src && !v.hidden) v.innerHTML = video ? `<video src="${src}" controls autoplay playsinline></video>` : `<img src="${src}" alt="">`;
     } catch (e) { /* offline: the small preview stays */ }
   }
 };
 document.addEventListener('click', e => {
+  if (e.target.closest('#view video')) return;
   if (e.target.closest('#view')) { $('#view').hidden = true; $('#view').innerHTML = ''; return; }
   const el = e.target.closest('[data-act]'); if (el) actions[el.dataset.act]?.(el);
 });
