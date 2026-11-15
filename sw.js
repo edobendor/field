@@ -1,5 +1,5 @@
 // Network first, cache fallback: the app keeps opening in the field without reception.
-const CACHE = 'field-reports-v12';
+const CACHE = 'field-reports-v13';
 const FILES = ['./', 'index.html', 'styles.css', 'config.js', 'i18n.js', 'app.js', 'icon.svg', 'login.jpg', 'manifest.webmanifest', 'breeding/', 'breeding/breeding.js', 'breeding/icon.svg', 'breeding/manifest.webmanifest'];
 
 self.addEventListener('install', e => {
