@@ -85,7 +85,7 @@ button { font-family: inherit; cursor: pointer; }
   transition: opacity .25s; z-index: 20; max-width: 90vw; text-align: center;
 }
 #toast.show { opacity: 1; }
-.tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px; }
+.tabs { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; margin-bottom: 12px; }
 .tabs button { padding: 9px 4px; border-radius: 99px; border: 1px solid var(--line); background: #fff; font-size: 15px; color: inherit; }
 .tabs button.sel { background: var(--brand); color: #fff; border-color: var(--brand); }
 .filters { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; margin-bottom: 12px; }

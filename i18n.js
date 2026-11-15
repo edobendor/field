@@ -30,7 +30,7 @@ const I18N = {
     act_prune: 'גיזום', act_thin: 'דילול', act_harvest: 'קטיף', act_irrigate: 'השקיה', act_spray: 'ריסוס',
     act_plant: 'נטיעה', act_weed: 'עישוב', act_train: 'הדליה וקשירה', act_pack: 'אריזה', act_other: 'אחר',
     unit_trees: 'עצים', unit_cartons: 'קרטונים', unit_bins: 'מכלים', unit_rows: 'שורות', unit_dunam: 'דונם', unit_none: 'ללא',
-    role_worker: 'עובד', role_leader: 'ראש צוות', role_admin: 'מנהל',
+    role_worker: 'עובד', role_leader: 'ראש צוות', role_viewer: 'מנהל צופה', role_admin: 'מנהל',
     tabAtt: 'נוכחות', tabSum: 'סיכום לשכר', tabRep: 'דיווחי עבודה', tabUsers: 'עובדים',
     from: 'מתאריך', to: 'עד תאריך', worker: 'עובד', all: 'הכל', exportCsv: 'ייצוא לאקסל', refresh: 'רענן',
     locIn: 'מיקום כניסה', locOut: 'מיקום יציאה', location: 'מיקום', source: 'מקור', srcSelf: 'עצמי', srcLeader: 'ראש צוות',

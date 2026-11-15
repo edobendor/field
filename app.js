@@ -33,7 +33,7 @@ const ACTIVITIES = [
 const UNITS = ['trees', 'cartons', 'bins', 'rows', 'dunam', 'none'];
 
 // ---------- local state ----------
-const LS = 'fr_state_v2';
+const LS = 'fr_state_v2' + (API_URL === 'api' ? '_mock' : ''); // local test data never mixes with the real session
 const EMPTY = { token: null, user: null, users: [], punches: [], reports: [], consent: false };
 let S = (() => {
   try { const j = JSON.parse(localStorage.getItem(LS)); if (j && Array.isArray(j.outbox)) return { ...EMPTY, ...j }; } catch (e) { /* start clean */ }
@@ -41,6 +41,8 @@ let S = (() => {
 })();
 const persist = () => localStorage.setItem(LS, JSON.stringify(S));
 const nameOf = (id, list) => (list || S.users).find(u => u.id === id)?.name || '';
+const MGR = ['admin', 'viewer'];
+const isMgr = () => !!S.user && MGR.includes(S.user.role);
 const myOutbox = () => S.user ? S.outbox.filter(o => o.userId === S.user.id) : [];
 
 // media blobs wait in IndexedDB until they are delivered
@@ -211,9 +213,9 @@ function render() {
   app.className = '';
   if (!S.user) { $('#nav').innerHTML = ''; app.innerHTML = vLogin(); return; }
   if (!S.consent) { $('#nav').innerHTML = ''; app.innerHTML = vConsent(); return; }
-  if (view === 'admin' && S.user.role !== 'admin') view = 'home';
+  if (view === 'admin' && !isMgr()) view = 'home';
   const tabs = [['home', '🏠'], ['report', '📝'], ['mine', '📋']];
-  if (S.user.role === 'admin') tabs.push(['admin', '⚙️']);
+  if (isMgr()) tabs.push(['admin', '⚙️']);
   $('#nav').innerHTML = tabs.map(([v, ic]) => `<button data-act="go" data-view="${v}" class="${view === v ? 'sel' : ''}"><span class="ic">${ic}</span>${esc(t(v))}</button>`).join('');
   if (view === 'admin') app.className = 'wide';
   app.innerHTML = ({ home: vHome, report: vReport, mine: vMine, admin: vAdmin })[view]();
@@ -255,12 +257,12 @@ function vHome() {
 }
 
 function vReport() {
-  const crew = S.users.filter(u => u.role !== 'admin' || u.id === S.user.id);
+  const crew = S.users.filter(u => !MGR.includes(u.role) || u.id === S.user.id);
   const single = S.user.role === 'worker';
   return `<form id="repForm" class="card"><h2>${esc(t('report'))}</h2>
     <label for="rDate">${esc(t('date'))}</label><input id="rDate" type="date" value="${dstr(new Date())}" max="${dstr(new Date())}" required>
     <label for="rAct">${esc(t('activity'))}</label><select id="rAct">${ACTIVITIES.map(([a]) => `<option value="${a}">${esc(t('act_' + a))}</option>`).join('')}</select>
-    ${single ? '' : `<label>${esc(t('crew'))}</label><div class="crew">${crew.map(u => `<label><input type="checkbox" name="crew" value="${u.id}"${u.id === S.user.id && S.user.role !== 'admin' ? ' checked' : ''}>${esc(u.name)}</label>`).join('')}</div>
+    ${single ? '' : `<label>${esc(t('crew'))}</label><div class="crew">${crew.map(u => `<label><input type="checkbox" name="crew" value="${u.id}"${u.id === S.user.id && !isMgr() ? ' checked' : ''}>${esc(u.name)}</label>`).join('')}</div>
     <label for="rExtra">${esc(t('extraWorkers'))}</label><input id="rExtra" type="number" min="0" value="0" inputmode="numeric">`}
     <div class="row"><div><label for="rStart">${esc(t('start'))}</label><input id="rStart" type="time" value="06:00" required></div>
       <div><label for="rEnd">${esc(t('end'))}</label><input id="rEnd" type="time" value="${tnow()}" required></div></div>
@@ -317,7 +319,8 @@ async function loadAdmin() {
 function vAdmin() {
   if (aBusy) return `<div class="card muted">${esc(t('loading'))}</div>`;
   if (!A || aErr) return `<div class="card"><p class="muted">${esc(aErr ? t('offline') : t('loading'))}</p><button class="btn small" data-act="reload">${esc(t('retry'))}</button></div>`;
-  const tabs = [['att', 'tabAtt'], ['sum', 'tabSum'], ['rep', 'tabRep'], ['users', 'tabUsers']];
+  const tabs = [['att', 'tabAtt'], ['sum', 'tabSum'], ['rep', 'tabRep']];
+  if (S.user.role === 'admin') tabs.push(['users', 'tabUsers']); else if (adminTab === 'users') adminTab = 'att';
   const head = `<div class="tabs">${tabs.map(([k, l]) => `<button data-act="tab" data-tab="${k}" class="${adminTab === k ? 'sel' : ''}">${esc(t(l))}</button>`).join('')}</div>`;
   const filters = `<div class="filters">
     <div><label for="fFrom">${esc(t('from'))}</label><input id="fFrom" type="date" value="${filt.from}"></div>
@@ -342,7 +345,7 @@ function vAdmin() {
   } else {
     body = `<div class="scroll"><table><thead><tr><th>${esc(t('workerNum'))}</th><th>${esc(t('name'))}</th><th>${esc(t('role'))}</th><th>${esc(t('pin'))}</th><th>${esc(t('active'))}</th></tr></thead><tbody>
       ${A.users.map(u => `<tr data-id="${u.id}"><td><input data-f="num" value="${esc(u.num)}" inputmode="numeric" style="width:80px"></td><td><input data-f="name" value="${esc(u.name)}"></td>
-        <td><select data-f="role">${['worker', 'leader', 'admin'].map(r => `<option value="${r}"${u.role === r ? ' selected' : ''}>${esc(t('role_' + r))}</option>`).join('')}</select></td>
+        <td><select data-f="role">${['worker', 'leader', 'viewer', 'admin'].map(r => `<option value="${r}"${u.role === r ? ' selected' : ''}>${esc(t('role_' + r))}</option>`).join('')}</select></td>
         <td><input data-f="pin" value="${esc(u.pin)}" inputmode="numeric" maxlength="8" style="width:110px"></td>
         <td><input data-f="active" type="checkbox" style="width:22px;height:22px"${u.active ? ' checked' : ''}></td></tr>`).join('')}
       </tbody></table></div><div class="row" style="margin-top:12px"><button class="btn small sec" data-act="addUser">+ ${esc(t('add'))}</button><button class="btn small" data-act="saveUsers">${esc(t('save'))}</button></div>`;
@@ -442,7 +445,7 @@ document.addEventListener('submit', async e => {
       const j = await api('login', { num: $('#num').value.trim(), pin: $('#pin').value });
       if (j.ok) {
         S.token = j.token; applyState(j.state); persist();
-        view = S.user.role === 'admin' ? 'admin' : 'home'; render();
+        view = isMgr() ? 'admin' : 'home'; render();
         if (view === 'admin' && S.consent) loadAdmin();
         sync(); return;
       }
