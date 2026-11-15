@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#014e8c">
+<meta name="robots" content="noindex, nofollow">
+<title>בן דור - טיפוח</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { padding-bottom: 30px; }
+  .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; margin-top: 6px; }
+  .seg button, .chips button, .scale button {
+    border: 2px solid var(--line); background: #fff; color: inherit; border-radius: 10px; padding: 12px 4px; font-size: 16px; font-family: inherit;
+  }
+  .seg button.sel, .chips button.sel, .scale button.sel { border-color: var(--brand); background: var(--brand); color: #fff; font-weight: 700; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { padding: 10px 14px; }
+  .scale { display: grid; gap: 4px; }
+  .scale.n5 { grid-template-columns: repeat(5, 1fr); }
+  .scale.n10 { grid-template-columns: repeat(10, 1fr); }
+  .scale button { padding: 12px 0; font-size: 17px; font-weight: 600; }
+  .hint { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .codein { font-size: 24px; font-weight: 700; text-align: center; letter-spacing: 1px; direction: ltr; }
+  .code { direction: ltr; unicode-bidi: isolate; font-weight: 700; }
+  .thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .thumbs img { width: 84px; height: 84px; object-fit: cover; border-radius: 8px; cursor: pointer; background: #dde; }
+  .thumbs .t { position: relative; }
+  .thumbs .x { position: absolute; top: -6px; inset-inline-end: -6px; width: 24px; height: 24px; border-radius: 50%; border: 0; background: var(--red); color: #fff; font-size: 14px; }
+  .ev { border-top: 1px solid var(--line); padding: 12px 0; }
+  .ev:first-of-type { border-top: 0; }
+  .ev .h { font-weight: 700; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .ev .nums { margin: 4px 0; font-size: 16px; }
+  .ev .nums b { color: var(--brand-d); }
+  #view { position: fixed; inset: 0; background: rgba(0,0,0,.9); z-index: 30; display: flex; align-items: center; justify-content: center; }
+  #view[hidden] { display: none; }
+  #view img { max-width: 100%; max-height: 100%; }
+  .back::before { content: '‹ '; }
+  .back { background: none; border: 0; color: var(--brand-d); font-size: 16px; padding: 4px 0 10px; font-family: inherit; }
+</style>
+</head>
+<body>
+<header id="top"></header>
+<main id="app"></main>
+<div id="toast"></div>
+<div id="view" hidden></div>
+<script src="../config.js"></script>
+<script src="breeding.js"></script>
+</body>
+</html>
