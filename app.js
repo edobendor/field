@@ -435,7 +435,8 @@ function vAdmin() {
   } else {
     // People waiting for approval come first. Ticking "active" and saving approves them.
     const list = A.users.slice().sort((a, b) => (b.pending ? 1 : 0) - (a.pending ? 1 : 0));
-    body = `${waiting ? `<p class="pill warn" style="white-space:normal;font-size:15px">${esc(t('approveHelp'))}</p>` : ''}
+    body = `${waiting ? `<p class="pill warn" style="white-space:normal;font-size:15px">${esc(t('approveHelp'))}</p>
+      <button class="btn" style="margin:8px 0 14px" data-act="approveAll">✓ ${esc(t('approveAll'))} (${waiting})</button>` : ''}
       <div class="scroll"><table><thead><tr><th>${esc(t('workerNum'))}</th><th>${esc(t('name'))}</th><th>${esc(t('idnum'))}</th><th>${esc(t('phone'))}</th><th>${esc(t('role'))}</th><th>${esc(t('pin'))}</th><th>${esc(t('active'))}</th></tr></thead><tbody>
       ${list.map(u => `<tr data-id="${u.id}"${u.pending ? ' class="pending"' : ''}><td><input data-f="num" value="${esc(u.num)}" inputmode="numeric" style="width:70px"></td><td><input data-f="name" value="${esc(u.name)}"></td>
         <td><input data-f="idnum" value="${esc(u.idnum || '')}" maxlength="15" style="width:130px"></td><td><input data-f="phone" value="${esc(u.phone || '')}" inputmode="tel" maxlength="20" style="width:130px"></td>
@@ -603,6 +604,13 @@ const actions = {
     readUsers();
     const next = Math.max(0, ...A.users.map(u => parseInt(u.num, 10) || 0)) + 1;
     A.users.push({ id: uid(), num: String(next), name: '', role: 'worker', pin: newPin(), active: true, pending: false, idnum: '', phone: '' }); render();
+  },
+  // Ticks "active" for everyone who is waiting and saves, after one confirmation.
+  async approveAll() {
+    const rows = $$('tbody tr.pending');
+    if (!rows.length || !confirm(`${t('approveAll')}? (${rows.length})`)) return;
+    rows.forEach(tr => { const c = $('[data-f="active"]', tr); if (c) c.checked = true; });
+    await actions.saveUsers();
   },
   async saveUsers() {
     readUsers();
