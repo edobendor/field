@@ -20,7 +20,13 @@ const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + 
 const API_URL = (window.FR_CONFIG && window.FR_CONFIG.apiUrl) || 'api';
 const MAX_FILE = 25 * 1024 * 1024;
 
-let lang = localStorage.getItem('fr_lang') || 'he';
+// No saved choice yet: follow the phone's own language (Thai or Arabic phone), otherwise Hebrew.
+function phoneLang() {
+  const list = (navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language || '']).map(x => String(x).toLowerCase().slice(0, 2));
+  for (const l of list) { if (l === 'th' || l === 'ar' || l === 'he' || l === 'iw') return l === 'iw' ? 'he' : l; }
+  return 'he';
+}
+let lang = localStorage.getItem('fr_lang') || phoneLang();
 const t = k => (I18N[lang] && I18N[lang][k]) ?? I18N.he[k] ?? k;
 
 function toast(msg) {
