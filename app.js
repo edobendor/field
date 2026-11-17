@@ -145,28 +145,38 @@ function getPos() {
   return new Promise(res => {
     const none = { lat: null, lng: null, acc: null };
     if (!navigator.geolocation) return res(none);
-    let best = null, done = false, errs = 0, late = false, t1 = 0, t2 = 0;
+    // The first GPS answer is often a rough cell-tower guess (hundreds of metres). Keep listening and
+    // keep the best reading: stop at once at 30 m, accept 100 m after 6 s, take whatever there is at 15 s.
+    let best = warmFix && Date.now() - warmFix.at < 20000 ? warmFix.v : null, done = false, late = false, wid = null, t1 = 0, t2 = 0;
     posDenied = false;
-    const finish = () => { if (done) return; done = true; clearTimeout(t1); clearTimeout(t2); res(best || none); };
-    const ok = (p, fine) => {
-      const v = { lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6), acc: Math.round(p.coords.accuracy) };
-      if (!best || v.acc < best.acc) best = v;
-      if (fine || late || best.acc <= 50) finish();
+    const finish = () => {
+      if (done) return; done = true; clearTimeout(t1); clearTimeout(t2);
+      if (wid != null) navigator.geolocation.clearWatch(wid);
+      res(best || none);
     };
-    const fail = e => { if (e && e.code === 1) { posDenied = true; finish(); } else if (++errs === 2) finish(); };
-    navigator.geolocation.getCurrentPosition(p => ok(p, true), fail, { enableHighAccuracy: true, timeout: 25000, maximumAge: 0 });
-    navigator.geolocation.getCurrentPosition(p => ok(p, false), fail, { enableHighAccuracy: false, timeout: 12000, maximumAge: 60000 });
-    t1 = setTimeout(() => { late = true; if (best) finish(); }, 8000);
-    t2 = setTimeout(finish, 27000);
+    if (best && best.acc <= 30) return finish();
+    const ok = p => {
+      const v = fixOf(p);
+      if (!best || v.acc < best.acc) best = v;
+      if (best.acc <= 30 || (late && best.acc <= 100)) finish();
+    };
+    const fail = e => { if (e && e.code === 1) { posDenied = true; finish(); } };
+    wid = navigator.geolocation.watchPosition(ok, fail, { enableHighAccuracy: true, timeout: 25000, maximumAge: 0 });
+    navigator.geolocation.getCurrentPosition(ok, () => {}, { enableHighAccuracy: false, timeout: 12000, maximumAge: 60000 });
+    t1 = setTimeout(() => { late = true; if (best && best.acc <= 100) finish(); }, 6000);
+    t2 = setTimeout(finish, 15000);
   });
 }
+const fixOf = p => ({ lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6), acc: Math.round(p.coords.accuracy) });
 // Called when the home screen opens: the phone asks for the location permission before the first
-// clock-in, and the GPS is already awake when the worker taps. Nothing is kept from this reading.
-let warmed = false;
+// clock-in, and the GPS warms up for one minute so it is already accurate when the worker taps.
+// The reading stays in memory only and is used only if a clock-in follows within 20 seconds.
+let warmed = false, warmFix = null;
 function warmPos() {
   if (warmed || !navigator.geolocation) return;
   warmed = true;
-  navigator.geolocation.getCurrentPosition(() => {}, () => {}, { enableHighAccuracy: true, timeout: 25000, maximumAge: 0 });
+  const wid = navigator.geolocation.watchPosition(p => { warmFix = { v: fixOf(p), at: Date.now() }; }, () => {}, { enableHighAccuracy: true, timeout: 25000, maximumAge: 0 });
+  setTimeout(() => { navigator.geolocation.clearWatch(wid); warmed = false; }, 60000);
 }
 function locPill(l) {
   if (!l) return '';
@@ -296,6 +306,9 @@ function vHome() {
   let hrs = attendanceRows(mineData(), today, today, S.user.id).filter(r => r.source === 'self').reduce((s, r) => s + (r.hours || 0), 0);
   if (on) hrs += Math.max(0, mins(tnow()) - mins(last.time)) / 60;
   const todays = S.punches.filter(p => p.userId === S.user.id && p.date === today).sort((a, b) => pkey(a).localeCompare(pkey(b)));
+  const mrows = attendanceRows(mineData(), today.slice(0, 8) + '01', today, S.user.id).filter(r => r.source === 'self');
+  const mdays = new Set(mrows.map(r => r.date)).size;
+  const mhrs = mrows.reduce((s, r) => s + (r.hours || 0), 0) + (on ? Math.max(0, mins(tnow()) - mins(last.time)) / 60 : 0);
   const hr = new Date().getHours(), greet = t(hr < 12 ? 'gMorning' : hr < 17 ? 'gNoon' : 'gEve');
   return `<div class="card"><div class="greet">${esc(greet)}, ${esc(S.user.name)}</div>
     <div class="state ${on ? 'on' : ''}">${on ? `${esc(t('workingSince'))} ${last.time}` : esc(t('notWorking'))}</div>
@@ -304,6 +317,7 @@ function vHome() {
     <div id="gpsmsg" class="muted" style="margin-top:8px;min-height:20px"></div></div>
   <div class="card"><h2>${esc(t('today'))} · ${esc(t('hoursToday'))}: ${h2(hrs)}</h2>
     ${todays.length ? `<ul class="list">${todays.map(p => `<li><span>${esc(t(p.type))} ${p.time}</span><span>${locPill(p)}</span></li>`).join('')}</ul>` : `<div class="muted">${esc(t('noPunches'))}</div>`}</div>
+  <button class="card monthcard" data-act="go" data-view="mine"><span>${esc(t('monthHours'))}<br><span class="muted">${mdays} ${esc(t('workDays'))}</span></span><b>${h2(mhrs)}</b></button>
   ${homeReportBlock(on)}`;
 }
 // One work report per day, filled in at clock-out and editable until the end of that day.
@@ -547,8 +561,9 @@ const actions = {
   reload() { loadAdmin(); },
   async punch(el) {
     el.disabled = true; $('#gpsmsg').textContent = t('locating');
-    const pos = await getPos(), type = el.dataset.type;
-    const rec = { type, date: dstr(new Date()), time: tnow(), ...pos };
+    const type = el.dataset.type, date = dstr(new Date()), time = tnow();   // the time of the tap, not of the GPS answer
+    const pos = await getPos();
+    const rec = { type, date, time, ...pos };
     const id = uid();
     S.punches.push({ ...rec, id, userId: S.user.id });
     queue('punch', rec, id);

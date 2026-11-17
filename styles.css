@@ -164,3 +164,5 @@ details { margin-top: 12px; } summary { cursor: pointer; font-weight: 600; paddi
   td.wrap { min-width: 0; }
   td input:not([type=checkbox]), td select { width: 58% !important; min-width: 0; font-size: 16px; padding: 9px; }
 }
+.monthcard { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 10px; border: 0; font: inherit; color: inherit; text-align: start; cursor: pointer; }
+.monthcard b { font-size: 26px; color: var(--brand, #014e8c); }
