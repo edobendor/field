@@ -286,7 +286,7 @@ function vLogin() {
     <label for="gPin2">${esc(t('pinAgain'))}</label><input id="gPin2" type="password" inputmode="numeric" autocomplete="new-password" minlength="4" maxlength="8" required>
     <button class="btn" id="regBtn">${esc(t('register'))}</button>
     <button type="button" class="btn sec" data-act="hideReg">${esc(t('backToLogin'))}</button></form>`;
-  return `<div class="hero">${esc(t('loginHero'))}</div>${regDone ? `<div class="card"><span class="pill ok" style="white-space:normal;font-size:16px">${esc(t('regDone'))}</span></div>` : ''}
+  return `<div class="hero">${esc(t('loginHero'))}</div>${regDone ? `<div class="card"><span class="pill ok" style="white-space:normal;font-size:16px">${esc(t(regDone === 'now' ? 'regNow' : 'regDone'))}</span></div>` : ''}
   <form id="loginForm" class="card"><h2>${esc(t('loginTitle'))}</h2>
     <label for="num">${esc(t('loginId'))}</label><input id="num" autocomplete="username" value="${esc(localStorage.getItem('fr_lastid') || '')}" required>
     <label for="pin">${esc(t('pin'))}</label><input id="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="8" required>
@@ -664,7 +664,7 @@ document.addEventListener('submit', async e => {
     try {
       const idnum = $('#gId').value.trim();
       const j = await api('register', { name: $('#gName').value.trim(), idnum, phone: $('#gPhone').value.trim(), pin: $('#gPin').value, lang });
-      if (j.ok) { localStorage.setItem('fr_lastid', idnum); regMode = false; regDone = true; render(); window.scrollTo(0, 0); return; }
+      if (j.ok) { localStorage.setItem('fr_lastid', idnum); regMode = false; regDone = j.approved ? 'now' : true; render(); window.scrollTo(0, 0); return; }
       toast(t({ invalid: 'regInvalid', exists: 'regExists' }[j.error] || 'serverErr'));
     } catch (err) { toast(t('offline')); }
     btn.disabled = false;
