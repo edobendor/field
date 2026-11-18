@@ -346,8 +346,8 @@ function vReport() {
   return `<form id="repForm" class="card"${prev ? ' data-edit="1"' : ''}><h2>${esc(t(prev ? 'editTitle' : 'report'))} · ${dshow(prev ? prev.date : todayStr())}</h2>
     ${prev ? `<p class="muted">${esc(t('editHelp'))}</p>` : ''}
     <label for="rAct">${esc(t('activity'))}</label><select id="rAct">${ACTIVITIES.map(([a]) => `<option value="${a}"${sel(a, v.activity)}>${esc(t('act_' + a))}</option>`).join('')}</select>
-    ${single ? '' : `<label>${esc(t('crew'))}</label><div class="crew">${crew.map(u => `<label><input type="checkbox" name="crew" value="${u.id}"${v.crew.includes(u.id) ? ' checked' : ''}>${esc(u.name)}</label>`).join('')}</div>
-    <label for="rExtra">${esc(t('extraWorkers'))}</label><input id="rExtra" type="number" min="0" value="${v.extra}" inputmode="numeric">`}
+    ${single ? '' : `<label for="rTotal">${esc(t('totalWorkers'))}</label><input id="rTotal" type="number" min="1" value="${prev ? Math.max(1, v.crew.length + v.extra) : 1}" inputmode="numeric">
+    <label>${esc(t('crew'))}</label><div class="crew">${crew.map(u => `<label><input type="checkbox" name="crew" value="${u.id}"${v.crew.includes(u.id) ? ' checked' : ''}>${esc(u.name)}</label>`).join('')}</div>`}
     <div class="row"><div><label for="rStart">${esc(t('start'))}</label><input id="rStart" type="time" value="${esc(v.start)}" required></div>
       <div><label for="rEnd">${esc(t('end'))}</label><input id="rEnd" type="time" value="${esc(v.end)}" required></div></div>
     <label for="rBreak">${esc(t('breakMin'))}</label><input id="rBreak" type="number" min="0" value="${v.breakMin}" inputmode="numeric">
@@ -368,6 +368,12 @@ function afterReport() {
   const act = $('#rAct'), unit = $('#rUnit');
   const setUnit = () => { unit.value = (ACTIVITIES.find(a => a[0] === act.value) || [])[1] || 'none'; };
   act.addEventListener('change', setUnit); if (!form.dataset.edit) setUnit();
+  // Ticking names never leaves the total smaller than the number of names.
+  form.addEventListener('change', e => {
+    if (e.target.name !== 'crew') return;
+    const tot = $('#rTotal'), n = $$('input[name=crew]:checked').length;
+    if (tot && (parseInt(tot.value, 10) || 0) < n) tot.value = n;
+  });
   $('#rFiles').addEventListener('change', async e => {
     for (const f of [...e.target.files]) {
       const blob = await shrink(f);
@@ -670,8 +676,10 @@ document.addEventListener('submit', async e => {
     if (m <= 0) return toast(t('breakTooLong'));
     const single = S.user.role === 'worker';
     const crew = single ? [S.user.id] : $$('input[name=crew]:checked').map(i => i.value);
-    const extra = single ? 0 : (parseInt($('#rExtra').value, 10) || 0);
-    if (!crew.length && !extra) return toast(t('noCrew'));
+    // The form asks for the total number of workers; names ticked in the list are part of that total.
+    const total = single ? 1 : Math.max(parseInt($('#rTotal').value, 10) || 0, crew.length);
+    const extra = total - crew.length;
+    if (total < 1) return toast(t('noCrew'));
     const btn = $('#sendBtn'); btn.disabled = true; btn.textContent = t('locating');
     const rec = {
       date: todayReport() ? todayReport().date : todayStr(), activity: $('#rAct').value, crew, extra, start, end, breakMin: brk, hours: m / 60,
