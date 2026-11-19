@@ -48,7 +48,9 @@ let S = (() => {
   return { ...EMPTY, outbox: [] };
 })();
 const persist = () => localStorage.setItem(LS, JSON.stringify(S));
-const nameOf = (id, list) => (list || S.users).find(u => u.id === id)?.name || '';
+// Managers see the Hebrew nickname first (label); workers' own screens have no nickname and show the name.
+const nameOf = (id, list) => { const u = (list || S.users).find(u => u.id === id); return u ? (u.label || u.name) : ''; };
+const labelUsers = j => { (j.users || []).forEach(u => { u.label = u.nick ? `${u.nick} · ${u.name}` : u.name; }); return j; };
 const MGR = ['admin', 'viewer'];
 const isMgr = () => !!S.user && MGR.includes(S.user.role);
 // A full manager only looks at the data: no clock-in, no personal work report, no location notice (Ido 19.11.2026).
@@ -204,7 +206,7 @@ function attendanceRows(data, from, to, userId) {
     const ps = data.punches.filter(p => p.userId === u.id).sort((a, b) => pkey(a).localeCompare(pkey(b)));
     const mk = (pin, pout) => {
       const base = pin || pout;
-      rows.push({ date: base.date, userId: u.id, name: u.name, tin: pin ? pin.time : '', tout: pout ? pout.time : '',
+      rows.push({ date: base.date, userId: u.id, name: u.label || u.name, tin: pin ? pin.time : '', tout: pout ? pout.time : '',
         hours: pin && pout ? (mins(pout.time) - mins(pin.time)) / 60 : null, lin: pin, lout: pout, source: 'self', by: '' });
     };
     let open = null;
@@ -408,7 +410,7 @@ function vMine() {
 
 async function loadAdmin() {
   aBusy = true; render();
-  try { const j = await api('admin', { from: filt.from, to: filt.to }); if (j.ok) { A = j; aErr = false; } else aErr = true; }
+  try { const j = await api('admin', { from: filt.from, to: filt.to }); if (j.ok) { A = labelUsers(j); aErr = false; } else aErr = true; }
   catch (e) { aErr = true; }
   aBusy = false; render();
 }
@@ -424,7 +426,7 @@ function vAdmin() {
   const filters = `<div class="filters">
     <div><label for="fFrom">${esc(t('from'))}</label><input id="fFrom" type="date" value="${filt.from}"></div>
     <div><label for="fTo">${esc(t('to'))}</label><input id="fTo" type="date" value="${filt.to}"></div>
-    <div class="f-user"><label for="fUser">${esc(t('worker'))}</label><select id="fUser"><option value="">${esc(t('all'))}</option>${A.users.map(u => `<option value="${u.id}"${filt.user === u.id ? ' selected' : ''}>${esc(u.name)}</option>`).join('')}</select></div>
+    <div class="f-user"><label for="fUser">${esc(t('worker'))}</label><select id="fUser"><option value="">${esc(t('all'))}</option>${A.users.map(u => `<option value="${u.id}"${filt.user === u.id ? ' selected' : ''}>${esc(u.label || u.name)}</option>`).join('')}</select></div>
     <div class="f-btns"><button class="btn small sec" data-act="reload">⟳ ${esc(t('refresh'))}</button> <button class="btn small" data-act="csv">⬇ ${esc(t('exportCsv'))}</button></div></div>`;
   const tbl = (cols, rows) => rows.length ? `<div class="scroll"><table><thead><tr>${cols.map(c => `<th>${esc(t(c))}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>` : `<div class="muted">${esc(t('noRows'))}</div>`;
   let body = '';
@@ -446,8 +448,8 @@ function vAdmin() {
     const list = A.users.slice().sort((a, b) => (b.pending ? 1 : 0) - (a.pending ? 1 : 0));
     body = `${waiting ? `<p class="pill warn" style="white-space:normal;font-size:15px">${esc(t('approveHelp'))}</p>
       <button class="btn" style="margin:8px 0 14px" data-act="approveAll">✓ ${esc(t('approveAll'))} (${waiting})</button>` : ''}
-      <div class="scroll"><table><thead><tr><th>${esc(t('workerNum'))}</th><th>${esc(t('name'))}</th><th>${esc(t('idnum'))}</th><th>${esc(t('phone'))}</th><th>${esc(t('role'))}</th><th>${esc(t('pin'))}</th><th>${esc(t('active'))}</th></tr></thead><tbody>
-      ${list.map(u => `<tr data-id="${u.id}"${u.pending ? ' class="pending"' : ''}><td><input data-f="num" value="${esc(u.num)}" inputmode="numeric" style="width:70px"></td><td><input data-f="name" value="${esc(u.name)}"></td>
+      <div class="scroll"><table><thead><tr><th>${esc(t('workerNum'))}</th><th>${esc(t('nick'))}</th><th>${esc(t('name'))}</th><th>${esc(t('idnum'))}</th><th>${esc(t('phone'))}</th><th>${esc(t('role'))}</th><th>${esc(t('pin'))}</th><th>${esc(t('active'))}</th></tr></thead><tbody>
+      ${list.map(u => `<tr data-id="${u.id}"${u.pending ? ' class="pending"' : ''}><td><input data-f="num" value="${esc(u.num)}" inputmode="numeric" style="width:70px"></td><td><input data-f="nick" value="${esc(u.nick || '')}" maxlength="30" style="width:110px"></td><td><input data-f="name" value="${esc(u.name)}"></td>
         <td><input data-f="idnum" value="${esc(u.idnum || '')}" maxlength="15" style="width:130px"></td><td><input data-f="phone" value="${esc(u.phone || '')}" inputmode="tel" maxlength="20" style="width:130px"></td>
         <td><select data-f="role">${['worker', 'leader', 'viewer', 'admin'].map(r => `<option value="${r}"${u.role === r ? ' selected' : ''}>${esc(t('role_' + r))}</option>`).join('')}</select></td>
         <td><input data-f="pin" value="${esc(u.pin)}" inputmode="numeric" maxlength="8" style="width:100px"></td>
@@ -472,7 +474,7 @@ const openAdmin = () => adminTab === 'dash' ? loadDash(!!D) : loadAdmin();
 async function loadDash(quiet) {
   const day = dDay;
   if (!quiet) { dBusy = true; render(); }
-  try { const j = await api('admin', { from: addDays(day, -6), to: day }); if (j.ok) { if (day === dDay) { D = j; dAt = tnow(); } dErr = false; } else dErr = true; }
+  try { const j = await api('admin', { from: addDays(day, -6), to: day }); if (j.ok) { if (day === dDay) { D = labelUsers(j); dAt = tnow(); } dErr = false; } else dErr = true; }
   catch (e) { dErr = true; }
   dBusy = false;
   if (view === 'admin' && adminTab === 'dash') render();
@@ -531,7 +533,7 @@ function vDash(waiting) {
       <span><b>${esc(p.name)}</b> ${status(p)}<br><span class="muted">${p.tin || '--:--'} - ${p.tout || '--:--'}${p.byLeader ? ` · ${esc(t('srcLeader'))}: ${esc(p.byLeader)}` : ''} · ${locPill(p.loc)}
       ${p.on ? '' : ` · <span class="pill ${p.hasReport ? 'ok' : 'warn'}">${esc(t('dRep'))} ${p.hasReport ? '✓' : '✗'}</span>`}</span></span>
       <b class="hrs">${h2(p.hours)}</b></li>`).join('')}</ul>` : `<div class="muted">${esc(t('dNone'))}</div>`}
-    ${st.absent.length ? `<details id="dAbs"${dAbsOpen ? ' open' : ''}><summary>${esc(t('dAbsent'))} (${st.absent.length})</summary><div class="muted">${st.absent.map(u => esc(u.name)).join(', ')}</div></details>` : ''}</div>`;
+    ${st.absent.length ? `<details id="dAbs"${dAbsOpen ? ' open' : ''}><summary>${esc(t('dAbsent'))} (${st.absent.length})</summary><div class="muted">${st.absent.map(u => esc(u.label || u.name)).join(', ')}</div></details>` : ''}</div>`;
   const acts = new Map();
   for (const r of st.reps) {
     if (!acts.has(r.activity)) acts.set(r.activity, { n: 0, wh: 0, q: new Map() });
@@ -626,7 +628,7 @@ const actions = {
     try {
       // Every row is sent: one whose name was cleared is deleted by the server.
       const j = await api('saveUsers', { users: A.users });
-      if (j.ok) { A.users = j.users; render(); toast(t('saved')); }
+      if (j.ok) { A.users = labelUsers(j).users; render(); toast(t('saved')); }
       else toast(t({ dup_num: 'dupNum', dup_id: 'dupId', need_admin: 'needAdmin' }[j.error] || 'serverErr'));
     } catch (e) { toast(t('offline')); }
   },
