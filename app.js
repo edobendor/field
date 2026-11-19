@@ -203,6 +203,7 @@ function attendanceRows(data, from, to, userId) {
   const rows = [];
   for (const u of data.users) {
     if (userId && u.id !== userId) continue;
+    if (u.role === 'admin') continue;   // full managers do not report hours and never appear in attendance, summary or the dashboard
     const ps = data.punches.filter(p => p.userId === u.id).sort((a, b) => pkey(a).localeCompare(pkey(b)));
     const mk = (pin, pout) => {
       const base = pin || pout;
@@ -221,6 +222,7 @@ function attendanceRows(data, from, to, userId) {
     for (const id of r.crew) {
       if (userId && id !== userId) continue;
       const name = nameOf(id, data.users); if (!name) continue;
+      if ((data.users.find(x => x.id === id) || {}).role === 'admin') continue;
       rows.push({ date: r.date, userId: id, name, tin: r.start, tout: r.end, hours: r.hours, lin: r.loc, lout: null, source: 'leader', by: nameOf(r.userId, data.users) });
     }
   }
@@ -426,7 +428,7 @@ function vAdmin() {
   const filters = `<div class="filters">
     <div><label for="fFrom">${esc(t('from'))}</label><input id="fFrom" type="date" value="${filt.from}"></div>
     <div><label for="fTo">${esc(t('to'))}</label><input id="fTo" type="date" value="${filt.to}"></div>
-    <div class="f-user"><label for="fUser">${esc(t('worker'))}</label><select id="fUser"><option value="">${esc(t('all'))}</option>${A.users.map(u => `<option value="${u.id}"${filt.user === u.id ? ' selected' : ''}>${esc(u.label || u.name)}</option>`).join('')}</select></div>
+    <div class="f-user"><label for="fUser">${esc(t('worker'))}</label><select id="fUser"><option value="">${esc(t('all'))}</option>${A.users.filter(u => u.role !== 'admin').map(u => `<option value="${u.id}"${filt.user === u.id ? ' selected' : ''}>${esc(u.label || u.name)}</option>`).join('')}</select></div>
     <div class="f-btns"><button class="btn small sec" data-act="reload">⟳ ${esc(t('refresh'))}</button> <button class="btn small" data-act="csv">⬇ ${esc(t('exportCsv'))}</button></div></div>`;
   const tbl = (cols, rows) => rows.length ? `<div class="scroll"><table><thead><tr>${cols.map(c => `<th>${esc(t(c))}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>` : `<div class="muted">${esc(t('noRows'))}</div>`;
   let body = '';
