@@ -51,6 +51,8 @@ const persist = () => localStorage.setItem(LS, JSON.stringify(S));
 const nameOf = (id, list) => (list || S.users).find(u => u.id === id)?.name || '';
 const MGR = ['admin', 'viewer'];
 const isMgr = () => !!S.user && MGR.includes(S.user.role);
+// A full manager only looks at the data: no clock-in, no personal work report, no location notice (Ido 19.11.2026).
+const noSelf = () => !!S.user && S.user.role === 'admin';
 const myOutbox = () => S.user ? S.outbox.filter(o => o.userId === S.user.id) : [];
 
 // media blobs wait in IndexedDB until they are delivered
@@ -248,7 +250,7 @@ function renderTop() {
 }
 // After a background sync: do not redraw a form someone is typing in.
 function softRender() {
-  if (!S.user || !S.consent) return render();
+  if (!S.user || (!S.consent && !noSelf())) return render();
   if (view === 'report' || (view === 'admin' && adminTab === 'users')) return renderTop();
   render();
 }
@@ -261,11 +263,12 @@ function render() {
   app.className = '';
   document.body.classList.toggle('bg', !S.user);   // orchard photo behind the login and registration screens
   if (!S.user) { $('#nav').innerHTML = ''; app.innerHTML = vLogin(); return; }
-  if (!S.consent) { $('#nav').innerHTML = ''; app.innerHTML = vConsent(); return; }
+  if (!S.consent && !noSelf()) { $('#nav').innerHTML = ''; app.innerHTML = vConsent(); return; }
+  if (noSelf()) view = 'admin';
   if (view === 'admin' && !isMgr()) view = 'home';
-  const tabs = [['home', '🏠'], ['report', '📝'], ['mine', '📋']];
+  const tabs = noSelf() ? [] : [['home', '🏠'], ['report', '📝'], ['mine', '📋']];
   if (isMgr()) tabs.push(['admin', '⚙️']);
-  $('#nav').innerHTML = tabs.map(([v, ic]) => `<button data-act="go" data-view="${v}" class="${view === v ? 'sel' : ''}"><span class="ic">${ic}</span>${esc(t(v))}</button>`).join('');
+  $('#nav').innerHTML = tabs.length < 2 ? '' : tabs.map(([v, ic]) => `<button data-act="go" data-view="${v}" class="${view === v ? 'sel' : ''}"><span class="ic">${ic}</span>${esc(t(v))}</button>`).join('');
   if (view === 'admin') app.className = 'wide';
   app.innerHTML = ({ home: vHome, report: vReport, mine: vMine, admin: vAdmin })[view]();
   if (view === 'report') afterReport();
@@ -651,7 +654,7 @@ document.addEventListener('submit', async e => {
         localStorage.setItem('fr_lastid', $('#num').value.trim()); regDone = false;
         S.token = j.token; applyState(j.state); persist();
         view = isMgr() ? 'admin' : 'home'; render();
-        if (view === 'admin' && S.consent) openAdmin();
+        if (view === 'admin' && (S.consent || noSelf())) openAdmin();
         sync(); return;
       }
       toast(t({ locked: 'locked', bad_login: 'badLogin', pending: 'pendingMsg' }[j.error] || 'serverErr'));
