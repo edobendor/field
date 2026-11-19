@@ -440,7 +440,7 @@ function vAdmin() {
       <td>${dshow(r.date)}</td><td>${esc(nameOf(r.userId, A.users))}</td><td>${esc(t('act_' + r.activity))}</td>
       <td title="${esc(r.crew.map(id => nameOf(id, A.users)).join(', '))}">${r.crew.length + r.extra}</td><td>${r.start}</td><td>${r.end}</td><td>${h2(r.hours)}</td><td>${h2(r.hours * (r.crew.length + r.extra))}</td>
       <td>${r.qty ?? ''}</td><td>${r.qty != null ? esc(t('unit_' + r.unit)) : ''}</td><td>${locPill(r.loc)}</td><td class="wrap">${esc(r.notes)}</td>
-      <td>${r.media.map(m => `<a href="${esc(m.url)}" target="_blank" rel="noopener" title="${esc(m.name)}">${kindIcon(m.kind)}</a>`).join(' ')}</td></tr>`));
+      <td>${r.media.map(m => `<button type="button" class="mediabtn" data-act="media" data-id="${esc(m.id)}" data-url="${esc(m.url)}" title="${esc(m.name)}">${kindIcon(m.kind)}</button>`).join(' ')}</td></tr>`));
   } else {
     // People waiting for approval come first. Ticking "active" and saving approves them.
     const list = A.users.slice().sort((a, b) => (b.pending ? 1 : 0) - (a.pending ? 1 : 0));
@@ -630,6 +630,26 @@ const actions = {
       else toast(t({ dup_num: 'dupNum', dup_id: 'dupId', need_admin: 'needAdmin' }[j.error] || 'serverErr'));
     } catch (e) { toast(t('offline')); }
   },
+  // A manager opens a photo, video or recording from a work report inside the app. The server reads the file
+  // from Drive, so no Google account or Drive permission is needed on the manager's phone.
+  async media(el) {
+    let box = $('#viewer');
+    if (!box) { box = document.createElement('div'); box.id = 'viewer'; document.body.appendChild(box); box.addEventListener('click', e => { if (e.target === box || e.target.dataset.close) actions.closeMedia(); }); }
+    box.innerHTML = `<div class="vmsg">${esc(t('loadingFile'))}</div>`; box.hidden = false;
+    try {
+      const j = await api('media', { id: el.dataset.id });
+      if (box.hidden) return;
+      if (!j.ok) { box.innerHTML = `<div class="vmsg">${esc(t('serverErr'))}</div><button class="vclose" data-close="1">✕</button>`; return; }
+      if (j.big) { actions.closeMedia(); window.open(j.url || el.dataset.url, '_blank', 'noopener'); return; }
+      const bin = atob(j.data), buf = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([buf], { type: j.mime || 'application/octet-stream' }));
+      box.dataset.url = url;
+      const tag = (j.mime || '').startsWith('video') ? `<video src="${url}" controls autoplay playsinline></video>` : (j.mime || '').startsWith('audio') ? `<audio src="${url}" controls autoplay></audio>` : `<img src="${url}" alt="">`;
+      box.innerHTML = `${tag}<div class="vname">${esc(j.name || '')}</div><button class="vclose" data-close="1">✕</button>`;
+    } catch (e) { box.innerHTML = `<div class="vmsg">${esc(t('offline'))}</div><button class="vclose" data-close="1">✕</button>`; }
+  },
+  closeMedia() { const box = $('#viewer'); if (!box) return; if (box.dataset.url) { URL.revokeObjectURL(box.dataset.url); delete box.dataset.url; } box.innerHTML = ''; box.hidden = true; },
   showReg() { regMode = true; regDone = false; render(); },
   hideReg() { regMode = false; render(); }
 };
