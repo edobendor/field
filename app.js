@@ -84,12 +84,17 @@ async function shrink(file) {
 }
 
 // ---------- server ----------
-async function api(action, payload = {}) {
-  const r = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action, token: S.token, ...payload }) });
-  if (!r.ok) throw new Error('http ' + r.status);
-  const j = await r.json();
-  if (!j.ok && j.error === 'auth' && S.token) { signOutLocal(); render(); }
-  return j;
+// Every request gives up after a while. Without this, a request caught by a loss of reception never ends,
+// and nothing queued behind it is ever sent (found 20.11.2026: a phone held three days of reports).
+async function api(action, payload = {}, ms = 45000) {
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), ms);
+  try {
+    const r = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action, token: S.token, ...payload }), signal: ctl.signal });
+    if (!r.ok) throw new Error('http ' + r.status);
+    const j = await r.json();
+    if (!j.ok && j.error === 'auth' && S.token) { signOutLocal(); render(); }
+    return j;
+  } finally { clearTimeout(timer); }
 }
 function signOutLocal() { S = { ...EMPTY, outbox: S.outbox }; A = null; view = 'home'; persist(); }
 
@@ -114,11 +119,12 @@ function applyState(st) {
 const myOutboxFor = id => S.outbox.filter(o => o.userId === id);
 const drop = ids => { S.outbox = S.outbox.filter(o => !ids.includes(o.id)); };
 
-let syncing = false, again = false;
+let syncing = false, again = false, syncAt = 0;
 async function sync() {
   if (!S.token) return;
-  if (syncing) { again = true; return; }
-  syncing = true;
+  // A send that has been running for more than four minutes is taken as dead and a new one starts.
+  if (syncing && Date.now() - syncAt < 240000) { again = true; return; }
+  syncing = true; syncAt = Date.now();
   try {
     const mine = myOutbox();
     const j = await api('sync', { ops: mine.filter(o => o.op !== 'media') });
@@ -127,7 +133,8 @@ async function sync() {
       for (const m of mine.filter(o => o.op === 'media')) {
         const blob = await mediaGet(m.id);
         if (!blob) { drop([m.id]); continue; }
-        const r = await api('sync', { ops: [{ ...m, rec: { ...m.rec, data: await toB64(blob) } }] });
+        syncAt = Date.now();
+        const r = await api('sync', { ops: [{ ...m, rec: { ...m.rec, data: await toB64(blob) } }] }, 180000);
         if (!r.ok) break;
         drop(r.done); await mediaDel(m.id); applyState(r.state); persist();
       }
@@ -191,6 +198,7 @@ const locText = l => !l ? '' : l.lat == null ? t('noGps') : `${l.lat}, ${l.lng}`
 
 // ---------- view state ----------
 let view = 'home', adminTab = 'dash';
+let punching = false;   // a clock-in or clock-out is waiting for its location
 let regMode = false, regDone = false;   // login screen: registration form / "registration received" notice
 let pending = [];      // attachments in the open report form: {id, blob, name, kind}
 let recorder = null;
@@ -210,11 +218,15 @@ function attendanceRows(data, from, to, userId) {
       rows.push({ date: base.date, userId: u.id, name: u.label || u.name, tin: pin ? pin.time : '', tout: pout ? pout.time : '',
         hours: pin && pout ? (mins(pout.time) - mins(pin.time)) / 60 : null, lin: pin, lout: pout, source: 'self', by: '' });
     };
-    let open = null;
+    // A day can have several periods (in, out, in again, out): each pair is one row and the hours add up.
+    // The same button pressed twice within two minutes is one press, not a second period.
+    let open = null, lastOut = null;
+    const twice = (a, b) => !!a && a.date === b.date && mins(b.time) - mins(a.time) <= 2;
     for (const p of ps) {
-      if (p.type === 'in') { if (open) mk(open, null); open = p; }
-      else if (open && open.date === p.date) { mk(open, p); open = null; }
-      else { if (open) { mk(open, null); open = null; } mk(null, p); }
+      if (p.type === 'in') { if (twice(open, p)) continue; if (open) mk(open, null); open = p; }
+      else if (open && open.date === p.date) { mk(open, p); open = null; lastOut = p; }
+      else if (!open && twice(lastOut, p)) continue;
+      else { if (open) { mk(open, null); open = null; } mk(null, p); lastOut = p; }
     }
     if (open) mk(open, null);
   }
@@ -320,11 +332,12 @@ function vHome() {
   return `<div class="card"><div class="greet">${esc(greet)}, ${esc(S.user.name)}</div>
     <div class="state ${on ? 'on' : ''}">${on ? `${esc(t('workingSince'))} ${last.time}` : esc(t('notWorking'))}</div>
     ${stale ? `<p class="pill warn" style="white-space:normal">${esc(t('openFromBefore'))}</p>` : ''}
-    <button class="punch ${on ? 'out' : ''}" data-act="punch" data-type="${on ? 'out' : 'in'}">${esc(t(on ? 'punchOut' : 'punchIn'))}</button>
-    <div id="gpsmsg" class="muted" style="margin-top:8px;min-height:20px"></div></div>
+    <button class="punch ${on ? 'out' : ''}" data-act="punch" data-type="${on ? 'out' : 'in'}"${punching ? ' disabled' : ''}>${esc(t(on ? 'punchOut' : 'punchIn'))}</button>
+    <div id="gpsmsg" class="muted" style="margin-top:8px;min-height:20px">${punching ? esc(t('locating')) : ''}</div></div>
   <div class="card"><h2>${esc(t('today'))} · ${esc(t('hoursToday'))}: ${h2(hrs)}</h2>
     ${todays.length ? `<ul class="list">${todays.map(p => `<li><span>${esc(t(p.type))} ${p.time}</span><span>${locPill(p)}</span></li>`).join('')}</ul>` : `<div class="muted">${esc(t('noPunches'))}</div>`}</div>
   <button class="card monthcard" data-act="go" data-view="mine"><span>${esc(t('monthHours'))}<br><span class="muted">${mdays} ${esc(t('workDays'))}</span></span><b>${h2(mhrs)}</b></button>
+  ${myOutbox().length ? `<button class="pill warn" style="white-space:normal;font-size:15px;display:block;width:100%;margin-bottom:14px;border:0;padding:10px" data-act="syncNow">⏳ ${myOutbox().length} · ${esc(t('notSentYet'))}</button>` : ''}
   ${homeReportBlock(on)}`;
 }
 // One work report per day, filled in at clock-out and editable until the end of that day.
@@ -348,7 +361,9 @@ function vReport() {
   const prev = todayReport(), ps = myTodayPunches();
   const firstIn = ps.find(p => p.type === 'in'), lastOut = ps.filter(p => p.type === 'out').pop();
   const v = prev || { activity: ACTIVITIES[0][0], crew: isMgr() ? [] : [S.user.id], extra: 0, start: firstIn ? firstIn.time : '06:00', end: lastOut ? lastOut.time : tnow(), breakMin: 30, qty: null, unit: '', notes: '', media: [] };
-  if (!prev && mins(v.end) - mins(v.start) < 360) v.breakMin = 0;   // no default break on a short day
+  // Time between a clock-out and the next clock-in (a trip to the office, for example) is not work time.
+  let away = 0; ps.forEach((p, i) => { if (p.type === 'in' && i && ps[i - 1].type === 'out') away += mins(p.time) - mins(ps[i - 1].time); });
+  if (!prev) v.breakMin = (mins(v.end) - mins(v.start) - away < 360 ? 0 : 30) + away;   // no default break on a short day
   const sel = (a, b) => a === b ? ' selected' : '';
   return `<form id="repForm" class="card"${prev ? ' data-edit="1"' : ''}><h2>${esc(t(prev ? 'editTitle' : 'report'))} · ${dshow(prev ? prev.date : todayStr())}</h2>
     ${prev ? `<p class="muted">${esc(t('editHelp'))}</p>` : ''}
@@ -559,7 +574,7 @@ function readUsers() {
 const newPin = () => String(1000 + crypto.getRandomValues(new Uint32Array(1))[0] % 9000);
 const actions = {
   logout() { if (myOutbox().length && !confirm(t('unsentWarn'))) return; signOutLocal(); render(); },
-  syncNow() { sync(); },
+  syncNow() { if (Date.now() - syncAt > 20000) syncing = false; sync(); toast(t(myOutbox().length ? 'pendingSend' : 'allSent')); },
   agree() { S.consent = true; queue('consent', { lang }); render(); },
   go(el) { view = el.dataset.view; render(); window.scrollTo(0, 0); if (view === 'admin') openAdmin(); else sync(); },
   tab(el) { adminTab = el.dataset.tab; render(); window.scrollTo(0, 0); if (adminTab === 'dash') loadDash(!!D); else if (!A) loadAdmin(); },
@@ -574,9 +589,14 @@ const actions = {
   },
   reload() { loadAdmin(); },
   async punch(el) {
-    el.disabled = true; $('#gpsmsg').textContent = t('locating');
+    // One tap, one record. While the location is being read the screen may redraw and show the button again,
+    // so the lock lives here and not on the button; and a worker who is in cannot clock in again (nor out twice).
+    if (punching) return;
     const type = el.dataset.type, date = dstr(new Date()), time = tnow();   // the time of the tap, not of the GPS answer
-    const pos = await getPos();
+    const last = lastPunch(), isIn = !!last && last.type === 'in' && last.date === date;
+    if ((type === 'in') === isIn) { render(); return; }
+    punching = true; el.disabled = true; $('#gpsmsg').textContent = t('locating');
+    let pos; try { pos = await getPos(); } finally { punching = false; }
     const rec = { type, date, time, ...pos };
     const id = uid();
     S.punches.push({ ...rec, id, userId: S.user.id });
@@ -641,7 +661,7 @@ const actions = {
     if (!box) { box = document.createElement('div'); box.id = 'viewer'; document.body.appendChild(box); box.addEventListener('click', e => { if (e.target === box || e.target.dataset.close) actions.closeMedia(); }); }
     box.innerHTML = `<div class="vmsg">${esc(t('loadingFile'))}</div>`; box.hidden = false;
     try {
-      const j = await api('media', { id: el.dataset.id });
+      const j = await api('media', { id: el.dataset.id }, 120000);
       if (box.hidden) return;
       if (!j.ok) { box.innerHTML = `<div class="vmsg">${esc(t('serverErr'))}</div><button class="vclose" data-close="1">✕</button>`; return; }
       if (j.big) { actions.closeMedia(); window.open(j.url || el.dataset.url, '_blank', 'noopener'); return; }
@@ -762,6 +782,8 @@ window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); instal
 window.addEventListener('appinstalled', () => { installEvt = null; renderInstall(); });
 
 window.addEventListener('online', sync);
+// Coming back to the app (a phone keeps it asleep for days without reloading it) sends whatever is still waiting.
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.token && myOutbox().length) sync(); });
 setInterval(() => { if (myOutbox().length) sync(); }, 60000);
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
