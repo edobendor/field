@@ -661,7 +661,7 @@ const actions = {
     if (!box) { box = document.createElement('div'); box.id = 'viewer'; document.body.appendChild(box); box.addEventListener('click', e => { if (e.target === box || e.target.dataset.close) actions.closeMedia(); }); }
     box.innerHTML = `<div class="vmsg">${esc(t('loadingFile'))}</div>`; box.hidden = false;
     try {
-      const j = await api('media', { id: el.dataset.id }, 120000);
+      const j = await api('media', { id: el.dataset.id }, 300000);   // a video of 20 MB can take minutes on a phone
       if (box.hidden) return;
       if (!j.ok) { box.innerHTML = `<div class="vmsg">${esc(t('serverErr'))}</div><button class="vclose" data-close="1">✕</button>`; return; }
       if (j.big) { actions.closeMedia(); window.open(j.url || el.dataset.url, '_blank', 'noopener'); return; }
